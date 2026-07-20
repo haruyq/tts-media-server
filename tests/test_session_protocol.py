@@ -1,18 +1,19 @@
+import asyncio
 import unittest
 from pathlib import Path
 
 from utils.exceptions import SessionNotFound
-from utils.models import VoiceCredentials, WebSocketCommand
+from utils.models import AudioData, VoiceCredentials, WebSocketCommand
 from utils.session.protocol import SessionProtocol
 
 class VoiceSession:
     def __init__(self) -> None:
-        self.queued: list[Path] = []
+        self.played: list[Path | AudioData] = []
         self.stopped = False
         self.closed = False
 
-    async def play(self, path: Path) -> None:
-        self.queued.append(path)
+    async def play(self, audio: Path | AudioData) -> None:
+        self.played.append(audio)
 
     async def stop(self) -> None:
         self.stopped = True
@@ -47,10 +48,35 @@ class SessionManager:
         if session is not None:
             await session.close()
 
+class TTSPlugin:
+    async def synthesize(self, text: str, options: dict) -> AudioData:
+        return AudioData(text.encode())
+
+class BlockingTTSPlugin:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+
+    async def synthesize(self, text: str, options: dict) -> AudioData:
+        self.started.set()
+        await asyncio.Event().wait()
+
+class PluginManager:
+    def __init__(self) -> None:
+        self.plugin = TTSPlugin()
+
+    def get(self, plugin_name: str) -> TTSPlugin:
+        return self.plugin
+
 class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
     async def test_lifecycle_and_owned_session_cleanup(self):
         manager = SessionManager()
-        protocol = SessionProtocol("test", manager)
+        events = []
+
+        async def emit(event: dict) -> None:
+            events.append(event)
+
+        plugins = PluginManager()
+        protocol = SessionProtocol("test", manager, plugins, emit)
         credentials = {
             "guild_id": 1,
             "channel_id": 2,
@@ -64,15 +90,49 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
             WebSocketCommand("session.create", credentials)
         )
         session = manager.get("test")
-        queued = await protocol.handle(
+        playback_started = await protocol.handle(
             WebSocketCommand("playback.play", {"path": "audio.wav"})
         )
+        playback_task = protocol.playback_task
+
+        self.assertIsNotNone(playback_task)
+        await playback_task
+
+        speech_started = await protocol.handle(
+            WebSocketCommand(
+                "speech.play",
+                {"plugin": "voicevox", "text": "こんにちは"},
+            )
+        )
+        speech_task = protocol.playback_task
+
+        self.assertIsNotNone(speech_task)
+        await speech_task
+
+        blocking_plugin = BlockingTTSPlugin()
+        plugins.plugin = blocking_plugin
+        cancelled_started = await protocol.handle(
+            WebSocketCommand(
+                "speech.play",
+                {"plugin": "voicevox", "text": "停止"},
+            )
+        )
+        await asyncio.wait_for(blocking_plugin.started.wait(), 1)
         stopped = await protocol.handle(WebSocketCommand("playback.stop"))
 
         self.assertEqual(created["op"], "session.created")
         self.assertIsInstance(manager.credentials, VoiceCredentials)
-        self.assertEqual(queued["op"], "playback.queued")
-        self.assertEqual(session.queued, [Path("audio.wav")])
+        self.assertEqual(playback_started["op"], "playback.started")
+        self.assertEqual(speech_started["op"], "speech.started")
+        self.assertEqual(cancelled_started["op"], "speech.started")
+        self.assertEqual(
+            session.played,
+            [Path("audio.wav"), AudioData("こんにちは".encode())],
+        )
+        self.assertEqual(
+            [event["op"] for event in events],
+            ["playback.finished", "speech.finished", "speech.stopped"],
+        )
         self.assertEqual(stopped["op"], "playback.stopped")
         self.assertTrue(session.stopped)
 
@@ -81,7 +141,12 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("test", manager.sessions)
         self.assertTrue(session.closed)
 
-        replacement_protocol = SessionProtocol("test", manager)
+        replacement_protocol = SessionProtocol(
+            "test",
+            manager,
+            plugins,
+            emit,
+        )
         await replacement_protocol.handle(
             WebSocketCommand("session.create", credentials)
         )

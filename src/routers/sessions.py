@@ -1,15 +1,16 @@
+import asyncio
 import json
-
 from pathlib import Path
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import TypeAdapter, ValidationError
 
+from utils.exceptions import PluginNotFound, SessionAlreadyExists, SessionNotFound
+from utils.logger import Logger
+from utils.models import VoiceCredentials, WebSocketCommand
+from utils.plugins import plugin_manager
 from utils.session.manager import session_manager
 from utils.session.protocol import SessionProtocol
-from utils.exceptions import SessionAlreadyExists, SessionNotFound
-from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
-from utils.session.manager import session_manager
-from utils.logger import Logger
 
 router = APIRouter(
     prefix="/sessions",
@@ -22,11 +23,11 @@ async def create_session(session_id: str, credentials: VoiceCredentials):
     await session_manager.create(session_id, credentials)
     return {"session_id": session_id, "status": "created"}
 
-@router.post("/{session_id}/play", status_code=202)
+@router.post("/{session_id}/play")
 async def play_audio(session_id: str, path: str):
     session = session_manager.get(session_id)
     await session.play(Path(path))
-    return {"session_id": session_id, "path": path, "status": "queued"}
+    return {"session_id": session_id, "path": path, "status": "played"}
 
 @router.delete("/{session_id}/playback/current")
 async def stop_current(session_id: str):
@@ -41,6 +42,8 @@ async def delete_session(session_id: str):
 
 @router.websocket("/{session_id}/ws")
 async def session_websocket(websocket: WebSocket, session_id: str):
+    send_lock = asyncio.Lock()
+
     def _error_response(code: str, message: str) -> dict:
         return {
             "op": "error",
@@ -50,9 +53,21 @@ async def session_websocket(websocket: WebSocket, session_id: str):
             },
         }
 
-    protocol = SessionProtocol(session_id, session_manager)
+    async def emit(message: dict) -> None:
+        async with send_lock:
+            try:
+                await websocket.send_json(message)
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+
+    protocol = SessionProtocol(
+        session_id,
+        session_manager,
+        plugin_manager,
+        emit,
+    )
     await websocket.accept()
-    await websocket.send_json(protocol.response("session.ready"))
+    await emit(protocol.response("session.ready"))
 
     try:
         while True:
@@ -71,6 +86,8 @@ async def session_websocket(websocket: WebSocket, session_id: str):
                 response = _error_response("session_already_exists", str(exception))
             except SessionNotFound as exception:
                 response = _error_response("session_not_found", str(exception))
+            except PluginNotFound as exception:
+                response = _error_response("plugin_not_found", str(exception))
             except ValueError as exception:
                 response = _error_response("invalid_command", str(exception))
             except WebSocketDisconnect:
@@ -82,7 +99,7 @@ async def session_websocket(websocket: WebSocket, session_id: str):
                     "コマンドの処理に失敗しました",
                 )
 
-            await websocket.send_json(response)
+            await emit(response)
 
             if response["op"] == "session.closed":
                 await websocket.close()

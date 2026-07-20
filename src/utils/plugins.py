@@ -1,8 +1,14 @@
+import sys
 from importlib.metadata import entry_points
+from importlib.util import module_from_spec, spec_from_file_location
+from pathlib import Path
 from typing import Any, Protocol
 
 from utils.exceptions import PluginNotFound
 from utils.models import AudioData
+from utils.logger import Logger
+
+Log = Logger(__name__)
 
 class TTSPlugin(Protocol):
     async def synthesize(
@@ -13,11 +19,15 @@ class TTSPlugin(Protocol):
         ...
 
 class PluginManager:
-    def __init__(self) -> None:
+    def __init__(self, plugins_dir: Path = Path("plugins")) -> None:
         self._plugins: dict[str, TTSPlugin] = {
             entry.name: entry.load()
             for entry in entry_points(group="tts_media_server.plugins")
         }
+
+        for path in sorted(plugins_dir.glob("*.py")):
+            if not path.name.startswith("_"):
+                self._load_file(path)
 
     @property
     def names(self) -> list[str]:
@@ -28,3 +38,41 @@ class PluginManager:
             return self._plugins[plugin_name]
         except KeyError:
             raise PluginNotFound(plugin_name)
+
+    def _load_file(self, path: Path) -> None:
+        plugin_name = path.stem
+
+        if plugin_name in self._plugins:
+            raise ValueError(f"プラグイン名が重複しています: {plugin_name}")
+
+        module_name = f"_tts_media_server_plugin_{plugin_name}"
+        spec = spec_from_file_location(module_name, path)
+
+        if spec is None or spec.loader is None:
+            raise ImportError(f"プラグインを読み込めません: {path}")
+
+        module = module_from_spec(spec)
+        previous_module = sys.modules.get(module_name)
+        sys.modules[module_name] = module
+
+        try:
+            spec.loader.exec_module(module)
+            plugin = getattr(module, "plugin", None)
+
+            if not callable(getattr(plugin, "synthesize", None)):
+                raise TypeError(
+                    f"plugin.synthesizeが定義されていません: {path}"
+                )
+        except BaseException:
+            if previous_module is None:
+                sys.modules.pop(module_name, None)
+            else:
+                sys.modules[module_name] = previous_module
+
+            raise
+        
+        Log.info(f"プラグインを読み込みました: {plugin_name} ({path})")
+
+        self._plugins[plugin_name] = plugin
+
+plugin_manager = PluginManager()

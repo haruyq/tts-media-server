@@ -1,20 +1,33 @@
+import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
 from pydantic import TypeAdapter
 
 from utils.exceptions import SessionAlreadyExists, SessionNotFound
-from utils.models import VoiceCredentials, WebSocketCommand
+from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
+from utils.plugins import PluginManager, TTSPlugin
 from utils.session.manager import SessionManager
 from utils.session.voice import VoiceSession
 
 credentials_adapter = TypeAdapter(VoiceCredentials)
+speech_adapter = TypeAdapter(SpeechRequest)
 
 class SessionProtocol:
-    def __init__(self, session_id: str, manager: SessionManager) -> None:
+    def __init__(
+        self,
+        session_id: str,
+        manager: SessionManager,
+        plugins: PluginManager,
+        emit: Callable[[dict[str, Any]], Awaitable[None]],
+    ) -> None:
         self.session_id = session_id
         self.manager = manager
+        self.plugins = plugins
+        self.emit = emit
         self.session: VoiceSession | None = None
+        self.playback_task: asyncio.Task[None] | None = None
 
     async def handle(self, command: WebSocketCommand) -> dict[str, Any]:
         if command.op == "ping":
@@ -32,7 +45,11 @@ class SessionProtocol:
             await self.close()
             return self.response("session.closed")
 
-        if command.op not in {"playback.play", "playback.stop"}:
+        if command.op not in {
+            "playback.play",
+            "playback.stop",
+            "speech.play",
+        }:
             raise ValueError(f"未対応の操作です: {command.op}")
 
         session = self._get_session()
@@ -43,14 +60,34 @@ class SessionProtocol:
             if not isinstance(path, str) or not path:
                 raise ValueError("pathには空でない文字列を指定してください")
 
-            await session.play(Path(path))
-            return self.response("playback.queued", path=path)
+            return self._start_playback(
+                lambda: session.play(Path(path)),
+                "playback",
+                path=path,
+            )
 
         if command.op == "playback.stop":
+            await self._cancel_playback()
             await session.stop()
             return self.response("playback.stopped")
 
+        request = speech_adapter.validate_python(command.data)
+
+        if not request.plugin:
+            raise ValueError("pluginを指定してください")
+
+        if not request.text.strip():
+            raise ValueError("textを指定してください")
+
+        plugin = self.plugins.get(request.plugin)
+        return self._start_playback(
+            lambda: self._synthesize_and_play(session, plugin, request),
+            "speech",
+            plugin=request.plugin,
+        )
+
     async def close(self) -> None:
+        await self._cancel_playback()
         session = self.session
         self.session = None
 
@@ -80,6 +117,68 @@ class SessionProtocol:
             raise SessionNotFound(self.session_id)
 
         return current
+
+    def _start_playback(
+        self,
+        create_operation: Callable[[], Awaitable[None]],
+        event: str,
+        **data: Any,
+    ) -> dict[str, Any]:
+        if self.playback_task is not None:
+            raise ValueError("別の音声を再生中です")
+
+        self.playback_task = asyncio.create_task(
+            self._run_playback(create_operation(), event, data)
+        )
+        return self.response(f"{event}.started", **data)
+
+    async def _run_playback(
+        self,
+        operation: Awaitable[None],
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        try:
+            try:
+                await operation
+            except Exception as exception:
+                response = self.response(
+                    f"{event}.failed",
+                    message=str(exception),
+                    **data,
+                )
+            else:
+                response = self.response(f"{event}.finished", **data)
+
+            await self.emit(response)
+        except asyncio.CancelledError:
+            await self.emit(self.response(f"{event}.stopped", **data))
+            raise
+        finally:
+            if self.playback_task is asyncio.current_task():
+                self.playback_task = None
+
+    async def _synthesize_and_play(
+        self,
+        session: VoiceSession,
+        plugin: TTSPlugin,
+        request: SpeechRequest,
+    ) -> None:
+        audio = await plugin.synthesize(request.text, request.options)
+        await session.play(audio)
+
+    async def _cancel_playback(self) -> None:
+        task = self.playback_task
+
+        if task is None:
+            return
+
+        task.cancel()
+
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     def response(self, op: str, **data: Any) -> dict[str, Any]:
         return {
