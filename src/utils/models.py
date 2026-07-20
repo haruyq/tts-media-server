@@ -20,3 +20,8 @@ class SpeechRequest:
     plugin: str
     text: str
     options: dict[str, Any] = field(default_factory=dict)
+
+@dataclass(frozen=True)
+class WebSocketCommand:
+    op: str
+    data: dict[str, Any] = field(default_factory=dict)

@@ -1,49 +1,93 @@
+import json
+
 from pathlib import Path
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import TypeAdapter, ValidationError
 
-from fastapi import APIRouter
+from utils.session.manager import session_manager
+from utils.session.protocol import SessionProtocol
+from utils.exceptions import SessionAlreadyExists, SessionNotFound
+from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
+from utils.session.manager import session_manager
+from utils.logger import Logger
 
-from utils.models import SpeechRequest, VoiceCredentials
-from utils.plugins import PluginManager
-from utils.session.manager import SessionManager
+router = APIRouter(
+    prefix="/sessions",
+)
+command_adapter = TypeAdapter(WebSocketCommand)
+Log = Logger(__name__)
 
-router = APIRouter()
-manager = SessionManager()
-plugins = PluginManager()
-
-@router.get("/plugins")
-async def list_plugins():
-    return {"plugins": plugins.names}
-
-@router.post("/sessions")
+@router.post("/")
 async def create_session(session_id: str, credentials: VoiceCredentials):
-    await manager.create(session_id, credentials)
+    await session_manager.create(session_id, credentials)
     return {"session_id": session_id, "status": "created"}
 
-@router.post("/sessions/{session_id}/play", status_code=202)
+@router.post("/{session_id}/play", status_code=202)
 async def play_audio(session_id: str, path: str):
-    session = manager.get(session_id)
+    session = session_manager.get(session_id)
     await session.play(Path(path))
     return {"session_id": session_id, "path": path, "status": "queued"}
 
-@router.post("/sessions/{session_id}/speech", status_code=202)
-async def synthesize_speech(session_id: str, request: SpeechRequest):
-    session = manager.get(session_id)
-    plugin = plugins.get(request.plugin)
-    audio = await plugin.synthesize(request.text, request.options)
-    await session.play(audio)
-    return {
-        "session_id": session_id,
-        "plugin": request.plugin,
-        "status": "queued",
-    }
-
-@router.delete("/sessions/{session_id}/playback/current")
+@router.delete("/{session_id}/playback/current")
 async def stop_current(session_id: str):
-    session = manager.get(session_id)
+    session = session_manager.get(session_id)
     await session.stop()
     return {"session_id": session_id, "status": "playback stopped"}
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/{session_id}")
 async def delete_session(session_id: str):
-    await manager.delete(session_id)
+    await session_manager.delete(session_id)
     return {"session_id": session_id, "status": "deleted"}
+
+@router.websocket("/{session_id}/ws")
+async def session_websocket(websocket: WebSocket, session_id: str):
+    def _error_response(code: str, message: str) -> dict:
+        return {
+            "op": "error",
+            "data": {
+                "code": code,
+                "message": message,
+            },
+        }
+
+    protocol = SessionProtocol(session_id, session_manager)
+    await websocket.accept()
+    await websocket.send_json(protocol.response("session.ready"))
+
+    try:
+        while True:
+            try:
+                message = await websocket.receive_json()
+                command = command_adapter.validate_python(message)
+                response = await protocol.handle(command)
+            except (
+                json.JSONDecodeError,
+                KeyError,
+                TypeError,
+                ValidationError,
+            ) as exception:
+                response = _error_response("invalid_message", str(exception))
+            except SessionAlreadyExists as exception:
+                response = _error_response("session_already_exists", str(exception))
+            except SessionNotFound as exception:
+                response = _error_response("session_not_found", str(exception))
+            except ValueError as exception:
+                response = _error_response("invalid_command", str(exception))
+            except WebSocketDisconnect:
+                raise
+            except Exception:
+                Log.exception("WebSocketコマンドの処理に失敗しました")
+                response = _error_response(
+                    "internal_error",
+                    "コマンドの処理に失敗しました",
+                )
+
+            await websocket.send_json(response)
+
+            if response["op"] == "session.closed":
+                await websocket.close()
+                return
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await protocol.close()

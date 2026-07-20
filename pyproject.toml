@@ -9,4 +9,5 @@ dependencies = [
     "discord-py[voice]>=2.7.1,<2.8",
     "fastapi>=0.139.2",
     "uvicorn>=0.51.0",
+    "websockets>=13.0",
 ]
