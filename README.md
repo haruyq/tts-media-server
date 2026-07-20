@@ -68,6 +68,7 @@ Authorization: Bearer <application.tomlのserver.password>
 - `GET /api/plugins`: 有効なPlugin一覧
 - `GET /api/speakers`: Plugin別の話者一覧
 - `GET /api/styles`: Plugin、話者別の話し方一覧
+- `GET /api/status`: Session使用枠とホスト全体のCPU、RAM使用状況
 - `POST /api/sessions/?session_id=...`: Session作成
 - `POST /api/sessions/{session_id}/play?path=...`: ローカル音声再生
 - `DELETE /api/sessions/{session_id}/playback/current`: 再生停止

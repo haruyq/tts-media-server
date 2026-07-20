@@ -4,6 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from routers.plugins import router as plugins_router
 from routers.sessions import router as sessions_router
+from routers.status import router as status_router
 from utils.config import is_authorized, settings
 from utils.exceptions import (
     PluginNotFound,
@@ -40,6 +41,7 @@ async def authenticate_api(request: Request, call_next):
 
 app.include_router(plugins_router, prefix="/api")
 app.include_router(sessions_router, prefix="/api")
+app.include_router(status_router, prefix="/api")
 
 default_openapi = app.openapi
 

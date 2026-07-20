@@ -15,6 +15,16 @@ class AudioData:
     data: bytes = field(repr=False)
 
 @dataclass(frozen=True)
+class ServerStatus:
+    session_count: int
+    max_sessions: int
+    available_sessions: int
+    cpu_percent: float
+    memory_percent: float
+    memory_available_bytes: int
+    memory_total_bytes: int
+
+@dataclass(frozen=True)
 class SpeechRequest:
     plugin: str
     speaker: str

@@ -21,6 +21,10 @@ class SessionManager:
         self.max_sessions = max_sessions
         self._closed = False
 
+    @property
+    def session_count(self) -> int:
+        return len(self._sessions) + len(self._creating)
+
     async def create(
         self,
         session_id: str,
@@ -36,7 +40,7 @@ class SessionManager:
         ):
             raise SessionAlreadyExists(session_id)
 
-        if len(self._sessions) + len(self._creating) >= self.max_sessions:
+        if self.session_count >= self.max_sessions:
             raise SessionLimitReached(self.max_sessions)
 
         task = asyncio.create_task(
