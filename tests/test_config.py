@@ -15,6 +15,7 @@ from utils.exceptions import SessionLimitReached
 class WebSocket:
     def __init__(self, authorization: str | None) -> None:
         self.headers = {"authorization": authorization}
+        self.client = SimpleNamespace(host="127.0.0.1", port=12345)
         self.accepted = False
         self.closed = None
         self.sent = []
@@ -39,7 +40,9 @@ class AuthenticationTest(unittest.IsolatedAsyncioTestCase):
         )
         response = await authenticate_api(request, AsyncMock())
         websocket = WebSocket(None)
-        await session_websocket(websocket, "test")
+
+        with self.assertLogs("routers.sessions", "INFO"):
+            await session_websocket(websocket, "test")
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["www-authenticate"], "Bearer")
@@ -71,9 +74,18 @@ class AuthenticationTest(unittest.IsolatedAsyncioTestCase):
         websocket = WebSocket(
             f"Bearer {settings.server.password}",
         )
-        await session_websocket(websocket, "test")
+
+        with self.assertLogs("routers.sessions", "INFO") as logs:
+            await session_websocket(websocket, "test")
 
         self.assertEqual(websocket.sent[0]["op"], "session.ready")
+        self.assertEqual(
+            [record.getMessage() for record in logs.records],
+            [
+                "WebSocket Connected: session_id=test, client=127.0.0.1:12345",
+                "WebSocket Closed: session_id=test, client=127.0.0.1:12345",
+            ],
+        )
 
     async def test_closes_sessions_on_shutdown(self):
         with patch(

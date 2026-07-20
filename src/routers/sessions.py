@@ -52,38 +52,49 @@ async def delete_session(session_id: str) -> dict[str, str]:
 @router.websocket("/{session_id}/ws")
 async def session_websocket(websocket: WebSocket, session_id: str):
     await websocket.accept()
-
-    if not is_authorized(websocket.headers.get("authorization")):
-        await websocket.close(code=1008, reason="Authentication failed")
-        return
-
-    send_lock = asyncio.Lock()
-
-    def _error_response(code: str, message: str) -> dict:
-        return {
-            "op": "error",
-            "data": {
-                "code": code,
-                "message": message,
-            },
-        }
-
-    async def emit(message: dict) -> None:
-        async with send_lock:
-            try:
-                await websocket.send_json(message)
-            except (RuntimeError, WebSocketDisconnect):
-                pass
-
-    protocol = SessionProtocol(
-        session_id,
-        session_manager,
-        plugin_manager,
-        emit,
+    client = websocket.client
+    client_address = (
+        f"{client.host}:{client.port}"
+        if client is not None
+        else "unknown"
     )
-    await emit(protocol.response("session.ready"))
+    Log.info(
+        f"WebSocket Connected: session_id={session_id}, "
+        f"client={client_address}"
+    )
+    protocol = None
 
     try:
+        if not is_authorized(websocket.headers.get("authorization")):
+            await websocket.close(code=1008, reason="Authentication failed")
+            return
+
+        send_lock = asyncio.Lock()
+
+        def _error_response(code: str, message: str) -> dict:
+            return {
+                "op": "error",
+                "data": {
+                    "code": code,
+                    "message": message,
+                },
+            }
+
+        async def emit(message: dict) -> None:
+            async with send_lock:
+                try:
+                    await websocket.send_json(message)
+                except (RuntimeError, WebSocketDisconnect):
+                    pass
+
+        protocol = SessionProtocol(
+            session_id,
+            session_manager,
+            plugin_manager,
+            emit,
+        )
+        await emit(protocol.response("session.ready"))
+
         while True:
             try:
                 message = await websocket.receive_json()
@@ -123,4 +134,11 @@ async def session_websocket(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        await protocol.close()
+        try:
+            if protocol is not None:
+                await protocol.close()
+        finally:
+            Log.info(
+                f"WebSocket Closed: session_id={session_id}, "
+                f"client={client_address}"
+            )
