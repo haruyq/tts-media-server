@@ -11,9 +11,13 @@ from utils.logger import Logger
 Log = Logger(__name__)
 
 class TTSPlugin(Protocol):
+    async def speakers(self) -> list[str]:
+        ...
+
     async def synthesize(
         self,
         text: str,
+        speaker: str,
         options: dict[str, Any],
     ) -> AudioData:
         ...
@@ -24,6 +28,9 @@ class PluginManager:
             entry.name: entry.load()
             for entry in entry_points(group="tts_media_server.plugins")
         }
+
+        for plugin_name, plugin in self._plugins.items():
+            self._validate_plugin(plugin, plugin_name)
 
         for path in sorted(plugins_dir.glob("*.py")):
             if not path.name.startswith("_"):
@@ -58,11 +65,7 @@ class PluginManager:
         try:
             spec.loader.exec_module(module)
             plugin = getattr(module, "plugin", None)
-
-            if not callable(getattr(plugin, "synthesize", None)):
-                raise TypeError(
-                    f"plugin.synthesizeが定義されていません: {path}"
-                )
+            self._validate_plugin(plugin, str(path))
         except BaseException:
             if previous_module is None:
                 sys.modules.pop(module_name, None)
@@ -70,9 +73,18 @@ class PluginManager:
                 sys.modules[module_name] = previous_module
 
             raise
-        
+
         Log.info(f"プラグインを読み込みました: {plugin_name} ({path})")
 
         self._plugins[plugin_name] = plugin
+
+    def _validate_plugin(self, plugin: Any, source: str) -> None:
+        if (
+            not callable(getattr(plugin, "speakers", None))
+            or not callable(getattr(plugin, "synthesize", None))
+        ):
+            raise TypeError(
+                f"plugin.speakersとplugin.synthesizeが必要です: {source}"
+            )
 
 plugin_manager = PluginManager()

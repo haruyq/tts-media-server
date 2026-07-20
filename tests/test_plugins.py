@@ -5,13 +5,17 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
+from routers.plugins import list_speakers, list_styles
 from utils.exceptions import PluginNotFound
 from utils.models import AudioData
 from utils.plugins import PluginManager
 
 class PluginManagerTest(unittest.TestCase):
     def test_loads_plugins(self):
-        plugin = object()
+        plugin = SimpleNamespace(
+            speakers=AsyncMock(return_value=["speaker"]),
+            synthesize=AsyncMock(),
+        )
         entry = SimpleNamespace(name="test", load=lambda: plugin)
 
         with TemporaryDirectory() as directory:
@@ -29,7 +33,10 @@ class PluginManagerTest(unittest.TestCase):
             plugin_path = Path(directory, "demo.py")
             plugin_path.write_text(
                 "class Plugin:\n"
-                "    async def synthesize(self, text, options):\n"
+                "    async def speakers(self):\n"
+                "        return ['speaker']\n"
+                "\n"
+                "    async def synthesize(self, text, speaker, options):\n"
                 "        return text\n"
                 "\n"
                 "plugin = Plugin()\n",
@@ -40,6 +47,7 @@ class PluginManagerTest(unittest.TestCase):
                 manager = PluginManager(Path(directory))
 
         self.assertEqual(manager.names, ["demo"])
+        self.assertTrue(callable(manager.get("demo").speakers))
         self.assertTrue(callable(manager.get("demo").synthesize))
 
     def test_rejects_invalid_plugin_file(self):
@@ -56,6 +64,26 @@ class PluginManagerTest(unittest.TestCase):
 class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
     async def test_synthesizes_audio(self):
         audio_query = {"accent_phrases": []}
+        speakers = [
+            {
+                "name": "ずんだもん",
+                "styles": [
+                    {"name": "ノーマル", "id": 3, "type": "talk"},
+                    {"name": "あまあま", "id": 1, "type": "talk"},
+                    {"name": "ソング", "id": 300, "type": "sing"},
+                ],
+            },
+            {
+                "name": "四国めたん",
+                "styles": [
+                    {"name": "あまあま", "id": 0, "type": "talk"},
+                ],
+            },
+        ]
+        speakers_response = MagicMock()
+        speakers_response.__aenter__ = AsyncMock(return_value=speakers_response)
+        speakers_response.__aexit__ = AsyncMock(return_value=None)
+        speakers_response.json = AsyncMock(return_value=speakers)
         query_response = MagicMock()
         query_response.__aenter__ = AsyncMock(return_value=query_response)
         query_response.__aexit__ = AsyncMock(return_value=None)
@@ -67,7 +95,13 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
         session = MagicMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=None)
-        session.post.side_effect = [query_response, synthesis_response]
+        session.get.return_value = speakers_response
+        session.post.side_effect = [
+            query_response,
+            synthesis_response,
+            query_response,
+            synthesis_response,
+        ]
         plugins_dir = Path(__file__).parents[1] / "plugins"
 
         with patch.dict(
@@ -78,9 +112,38 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
                 plugin = PluginManager(plugins_dir).get("voicevox")
 
         with patch("aiohttp.ClientSession", return_value=session):
-            audio = await plugin.synthesize("こんにちは", {})
+            speaker_names = await plugin.speakers()
+            styles = await plugin.styles()
+            audio = await plugin.synthesize(
+                "こんにちは",
+                "ずんだもん",
+                {"style": "あまあま"},
+            )
+            default_audio = await plugin.synthesize(
+                "こんばんは",
+                "ずんだもん",
+                {},
+            )
 
+        self.assertEqual(speaker_names, ["ずんだもん", "四国めたん"])
+        self.assertEqual(
+            styles,
+            {
+                "ずんだもん": ["ノーマル", "あまあま"],
+                "四国めたん": ["あまあま"],
+            },
+        )
         self.assertEqual(audio, AudioData(b"wave"))
+        self.assertEqual(default_audio, AudioData(b"wave"))
+        self.assertEqual(
+            session.get.call_args_list,
+            [
+                call("http://voicevox:50021/speakers"),
+                call("http://voicevox:50021/speakers"),
+                call("http://voicevox:50021/speakers"),
+                call("http://voicevox:50021/speakers"),
+            ],
+        )
         self.assertEqual(
             session.post.call_args_list,
             [
@@ -93,5 +156,59 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
                     params={"speaker": 1},
                     json=audio_query,
                 ),
+                call(
+                    "http://voicevox:50021/audio_query",
+                    params={"text": "こんばんは", "speaker": 3},
+                ),
+                call(
+                    "http://voicevox:50021/synthesis",
+                    params={"speaker": 3},
+                    json=audio_query,
+                ),
             ],
+        )
+
+class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
+    async def test_lists_speakers_by_plugin(self):
+        plugin = SimpleNamespace(
+            speakers=AsyncMock(return_value=["ずんだもん", "四国めたん"]),
+        )
+        manager = SimpleNamespace(
+            names=["voicevox"],
+            get=lambda _: plugin,
+        )
+
+        with patch("routers.plugins.plugin_manager", manager):
+            response = await list_speakers()
+
+        self.assertEqual(
+            response,
+            {"voicevox": ["ずんだもん", "四国めたん"]},
+        )
+
+    async def test_lists_optional_styles_by_plugin(self):
+        voicevox = SimpleNamespace(
+            styles=AsyncMock(
+                return_value={"ずんだもん": ["ノーマル", "あまあま"]},
+            ),
+        )
+        legacy = SimpleNamespace()
+        plugins = {
+            "voicevox": voicevox,
+            "legacy": legacy,
+        }
+        manager = SimpleNamespace(
+            names=["voicevox", "legacy"],
+            get=plugins.get,
+        )
+
+        with patch("routers.plugins.plugin_manager", manager):
+            response = await list_styles()
+
+        self.assertEqual(
+            response,
+            {
+                "voicevox": {"ずんだもん": ["ノーマル", "あまあま"]},
+                "legacy": {},
+            },
         )

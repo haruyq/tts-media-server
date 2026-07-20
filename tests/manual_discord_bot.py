@@ -16,7 +16,8 @@ class TTSBot(discord.Client):
         api_url: str,
         session_id: str,
         plugin: str,
-        speaker: int,
+        speaker: str,
+        style: str | None,
         speech_timeout: float,
     ) -> None:
         if speech_timeout <= 0:
@@ -35,6 +36,7 @@ class TTSBot(discord.Client):
         self.session_id = session_id
         self.plugin = plugin
         self.speaker = speaker
+        self.style = style
         self.speech_timeout = speech_timeout
         self.voice_state: dict[str, Any] | None = None
         self.voice_server: dict[str, Any] | None = None
@@ -149,8 +151,13 @@ class TTSBot(discord.Client):
                     "op": "speech.play",
                     "data": {
                         "plugin": self.plugin,
+                        "speaker": self.speaker,
                         "text": text,
-                        "options": {"speaker": self.speaker},
+                        "options": (
+                            {"style": self.style}
+                            if self.style
+                            else {}
+                        ),
                     },
                 })
                 try:
@@ -262,7 +269,8 @@ def main() -> None:
         os.environ.get("TTS_MEDIA_SERVER_URL", "http://127.0.0.1:8000"),
         os.environ.get("TTS_SESSION_ID", "manual-test"),
         os.environ.get("TTS_PLUGIN", "voicevox"),
-        int(os.environ.get("VOICEVOX_SPEAKER", "1")),
+        os.environ.get("TTS_SPEAKER", "ずんだもん"),
+        os.environ.get("TTS_STYLE"),
         float(os.environ.get("TTS_SPEECH_TIMEOUT", "120")),
     )
     bot.run(required("DISCORD_BOT_TOKEN"))

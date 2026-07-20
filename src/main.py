@@ -1,11 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from routers.sessions import router
+from routers.plugins import router as plugins_router
+from routers.sessions import router as sessions_router
 from utils.exceptions import PluginNotFound, SessionAlreadyExists, SessionNotFound
 
 app = FastAPI()
 
-app.include_router(router, prefix="/api")
+app.include_router(plugins_router, prefix="/api")
+app.include_router(sessions_router, prefix="/api")
 
 @app.exception_handler(SessionAlreadyExists)
 @app.exception_handler(SessionNotFound)

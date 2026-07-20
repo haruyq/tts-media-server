@@ -18,6 +18,7 @@ class AudioData:
 @dataclass(frozen=True)
 class SpeechRequest:
     plugin: str
+    speaker: str
     text: str
     options: dict[str, Any] = field(default_factory=dict)
 

@@ -49,14 +49,24 @@ class SessionManager:
             await session.close()
 
 class TTSPlugin:
-    async def synthesize(self, text: str, options: dict) -> AudioData:
+    async def synthesize(
+        self,
+        text: str,
+        speaker: str,
+        options: dict,
+    ) -> AudioData:
         return AudioData(text.encode())
 
 class BlockingTTSPlugin:
     def __init__(self) -> None:
         self.started = asyncio.Event()
 
-    async def synthesize(self, text: str, options: dict) -> AudioData:
+    async def synthesize(
+        self,
+        text: str,
+        speaker: str,
+        options: dict,
+    ) -> AudioData:
         self.started.set()
         await asyncio.Event().wait()
 
@@ -101,7 +111,11 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         speech_started = await protocol.handle(
             WebSocketCommand(
                 "speech.play",
-                {"plugin": "voicevox", "text": "こんにちは"},
+                {
+                    "plugin": "voicevox",
+                    "speaker": "ずんだもん",
+                    "text": "こんにちは",
+                },
             )
         )
         speech_task = protocol.playback_task
@@ -114,7 +128,11 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         cancelled_started = await protocol.handle(
             WebSocketCommand(
                 "speech.play",
-                {"plugin": "voicevox", "text": "停止"},
+                {
+                    "plugin": "voicevox",
+                    "speaker": "ずんだもん",
+                    "text": "停止",
+                },
             )
         )
         await asyncio.wait_for(blocking_plugin.started.wait(), 1)

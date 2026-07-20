@@ -76,6 +76,9 @@ class SessionProtocol:
         if not request.plugin:
             raise ValueError("pluginを指定してください")
 
+        if not request.speaker:
+            raise ValueError("speakerを指定してください")
+
         if not request.text.strip():
             raise ValueError("textを指定してください")
 
@@ -84,6 +87,7 @@ class SessionProtocol:
             lambda: self._synthesize_and_play(session, plugin, request),
             "speech",
             plugin=request.plugin,
+            speaker=request.speaker,
         )
 
     async def close(self) -> None:
@@ -164,7 +168,11 @@ class SessionProtocol:
         plugin: TTSPlugin,
         request: SpeechRequest,
     ) -> None:
-        audio = await plugin.synthesize(request.text, request.options)
+        audio = await plugin.synthesize(
+            request.text,
+            request.speaker,
+            request.options,
+        )
         await session.play(audio)
 
     async def _cancel_playback(self) -> None:
