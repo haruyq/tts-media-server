@@ -1,6 +1,10 @@
-def main():
-    print("Hello from tts-media-server!")
+from fastapi import FastAPI
+from routers.sessions import router
 
+app = FastAPI()
+
+app.include_router(router, prefix="/api")
 
 if __name__ == "__main__":
-    main()
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
