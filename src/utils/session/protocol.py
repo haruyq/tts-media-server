@@ -1,6 +1,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
+import re
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -16,6 +17,28 @@ from utils.session.voice import VoiceSession
 credentials_adapter = TypeAdapter(VoiceCredentials)
 speech_adapter = TypeAdapter(SpeechRequest)
 Log = Logger(__name__)
+_sentence_end = re.compile(r"[。！？!?]+[」』）】”’\"')\]}]*")
+
+def _split_sentences(text: str) -> list[str]:
+    sentences = []
+
+    for line in text.splitlines():
+        start = 0
+
+        for end in _sentence_end.finditer(line):
+            sentence = line[start:end.end()].strip()
+
+            if sentence:
+                sentences.append(sentence)
+
+            start = end.end()
+
+        sentence = line[start:].strip()
+
+        if sentence:
+            sentences.append(sentence)
+
+    return sentences
 
 class SessionProtocol:
     def __init__(
@@ -183,8 +206,9 @@ class SessionProtocol:
         plugin: TTSPlugin,
         request: SpeechRequest,
     ) -> None:
+        sentences = _split_sentences(request.text)
         audio = await plugin.synthesize(
-            request.text,
+            sentences[0],
             request.speaker,
             request.options,
         )
@@ -198,7 +222,29 @@ class SessionProtocol:
                 )
             )
 
-        await session.play(audio, started)
+        on_started = started
+
+        for sentence in sentences[1:]:
+            synthesis = asyncio.create_task(
+                plugin.synthesize(
+                    sentence,
+                    request.speaker,
+                    request.options,
+                )
+            )
+
+            try:
+                await session.play(audio, on_started)
+                audio = await synthesis
+            finally:
+                if not synthesis.done():
+                    synthesis.cancel()
+
+                await asyncio.gather(synthesis, return_exceptions=True)
+
+            on_started = None
+
+        await session.play(audio, on_started)
 
     async def _cancel_playback(self) -> None:
         task = self.playback_task
