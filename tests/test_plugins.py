@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -16,6 +15,9 @@ class PluginManagerTest(unittest.TestCase):
             plugin_path = Path(directory, "demo.py")
             plugin_path.write_text(
                 "class Plugin:\n"
+                "    def configure(self, config):\n"
+                "        self.config = config\n"
+                "\n"
                 "    async def speakers(self):\n"
                 "        return ['speaker']\n"
                 "\n"
@@ -26,11 +28,15 @@ class PluginManagerTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            manager = PluginManager(Path(directory))
+            manager = PluginManager(
+                Path(directory),
+                {"demo": {"enabled": True, "endpoint": "test"}},
+            )
             disabled = PluginManager(Path(directory), {})
 
         self.assertEqual(manager.names, ["demo"])
         self.assertEqual(disabled.names, [])
+        self.assertEqual(manager.get("demo").config, {"endpoint": "test"})
         self.assertTrue(callable(manager.get("demo").speakers))
         self.assertTrue(callable(manager.get("demo").synthesize))
 
@@ -46,6 +52,20 @@ class PluginManagerTest(unittest.TestCase):
 
             with self.assertRaisesRegex(TypeError, "invalid.py"):
                 PluginManager(Path(directory))
+
+    def test_rejects_unknown_voicevox_config(self):
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+
+        with self.assertRaisesRegex(ValueError, "base_ur1"):
+            PluginManager(
+                plugins_dir,
+                {
+                    "voicevox": {
+                        "enabled": True,
+                        "base_ur1": "http://voicevox:50021",
+                    },
+                },
+            )
 
 class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
     async def test_synthesizes_audio(self):
@@ -90,11 +110,15 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
         ]
         plugins_dir = Path(__file__).parents[1] / "plugins"
 
-        with patch.dict(
-            os.environ,
-            {"VOICEVOX_URL": "http://voicevox:50021"},
-        ):
-            plugin = PluginManager(plugins_dir).get("voicevox")
+        plugin = PluginManager(
+            plugins_dir,
+            {
+                "voicevox": {
+                    "enabled": True,
+                    "base_url": "http://voicevox:50021",
+                },
+            },
+        ).get("voicevox")
 
         with patch("aiohttp.ClientSession", return_value=session):
             speaker_names = await plugin.speakers()

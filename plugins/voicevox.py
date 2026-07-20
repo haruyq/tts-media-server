@@ -5,12 +5,34 @@ import aiohttp
 
 from utils.models import AudioData
 
-VOICEVOX_URL = os.environ.get(
-    "VOICEVOX_URL",
-    "http://127.0.0.1:50021",
-).rstrip("/")
-
 class VoicevoxPlugin:
+    def __init__(self) -> None:
+        self._base_url = ""
+        self.configure({})
+
+    def configure(self, config: dict[str, Any]) -> None:
+        unknown = set(config) - {"base_url"}
+
+        if unknown:
+            raise ValueError(
+                f"Unknown voicevox config: {', '.join(sorted(unknown))}"
+            )
+
+        base_url = config.get(
+            "base_url",
+            os.environ.get("VOICEVOX_URL", "http://127.0.0.1:50021"),
+        )
+
+        if not isinstance(base_url, str):
+            raise ValueError("voicevox.base_url must be a non-empty string")
+
+        base_url = base_url.strip().rstrip("/")
+
+        if not base_url:
+            raise ValueError("voicevox.base_url must be a non-empty string")
+
+        self._base_url = base_url
+
     async def speakers(self) -> list[str]:
         timeout = aiohttp.ClientTimeout(total=30)
 
@@ -59,14 +81,14 @@ class VoicevoxPlugin:
                 )
 
             async with session.post(
-                f"{VOICEVOX_URL}/audio_query",
+                f"{self._base_url}/audio_query",
                 params={"text": text, "speaker": speaker_id},
             ) as response:
                 response.raise_for_status()
                 audio_query = await response.json()
 
             async with session.post(
-                f"{VOICEVOX_URL}/synthesis",
+                f"{self._base_url}/synthesis",
                 params={"speaker": speaker_id},
                 json=audio_query,
             ) as response:
@@ -77,7 +99,7 @@ class VoicevoxPlugin:
         self,
         session: aiohttp.ClientSession,
     ) -> dict[str, dict[str, int]]:
-        async with session.get(f"{VOICEVOX_URL}/speakers") as response:
+        async with session.get(f"{self._base_url}/speakers") as response:
             response.raise_for_status()
             speakers = await response.json()
 

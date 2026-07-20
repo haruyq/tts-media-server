@@ -92,6 +92,28 @@ class AuthenticationTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 429)
 
 class ConfigTest(unittest.TestCase):
+    def test_loads_plugin_config(self):
+        source = Path(__file__).parents[1] / "application.example.toml"
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "application.toml")
+            path.write_text(
+                source.read_text(encoding="utf-8").replace(
+                    'password = "change-me-before-exposing"',
+                    'password = "test-password"',
+                ),
+                encoding="utf-8",
+            )
+            config = load_config(path)
+
+        self.assertEqual(
+            config.plugins["voicevox"],
+            {
+                "enabled": True,
+                "base_url": "http://127.0.0.1:50021",
+            },
+        )
+
     def test_rejects_empty_password(self):
         source = Path(__file__).parents[1] / "application.example.toml"
 

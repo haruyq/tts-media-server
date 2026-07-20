@@ -2,6 +2,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from secrets import compare_digest
+from typing import Any
 
 DEFAULT_PASSWORD = "change-me-before-exposing"
 
@@ -21,7 +22,7 @@ class LimitsConfig:
 class ApplicationConfig:
     server: ServerConfig
     limits: LimitsConfig
-    plugins: dict[str, bool]
+    plugins: dict[str, dict[str, Any]]
 
 def load_config(
     path: Path = Path(__file__).parents[2] / "application.toml",
@@ -31,7 +32,7 @@ def load_config(
 
     server = ServerConfig(**data["server"])
     limits = LimitsConfig(**data["limits"])
-    plugins = data.get("plugins", {})
+    plugin_values = data.get("plugins", {})
 
     if (
         not isinstance(server.ip, str)
@@ -58,11 +59,26 @@ def load_config(
     ):
         raise ValueError("All [limits] values must be positive integers")
 
-    if not isinstance(plugins, dict) or not all(
-        isinstance(name, str) and isinstance(enabled, bool)
-        for name, enabled in plugins.items()
-    ):
-        raise ValueError("All [plugins] values must be booleans")
+    if not isinstance(plugin_values, dict):
+        raise ValueError("[plugins] must be a table")
+
+    plugins: dict[str, dict[str, Any]] = {}
+
+    for name, plugin_config in plugin_values.items():
+        if isinstance(plugin_config, bool):
+            plugin_config = {"enabled": plugin_config}
+
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(plugin_config, dict)
+            or not isinstance(plugin_config.get("enabled"), bool)
+        ):
+            raise ValueError(
+                "Each [plugins] value must be a table with enabled = true or false"
+            )
+
+        plugins[name] = dict(plugin_config)
 
     return ApplicationConfig(server, limits, plugins)
 

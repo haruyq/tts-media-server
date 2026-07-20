@@ -26,16 +26,21 @@ class PluginManager:
     def __init__(
         self,
         plugins_dir: Path = Path("plugins"),
-        enabled: dict[str, bool] | None = None,
+        configs: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._plugins: dict[str, TTSPlugin] = {}
 
         for path in sorted(plugins_dir.glob("*.py")):
+            config = None if configs is None else configs.get(path.stem)
+
             if (
                 not path.name.startswith("_")
-                and (enabled is None or enabled.get(path.stem, False))
+                and (
+                    configs is None
+                    or config is not None and config["enabled"]
+                )
             ):
-                self._load_file(path)
+                self._load_file(path, config or {})
 
     @property
     def names(self) -> list[str]:
@@ -47,7 +52,7 @@ class PluginManager:
         except KeyError:
             raise PluginNotFound(plugin_name)
 
-    def _load_file(self, path: Path) -> None:
+    def _load_file(self, path: Path, config: dict[str, Any]) -> None:
         plugin_name = path.stem
         module_name = f"_tts_media_server_plugin_{plugin_name}"
         spec = spec_from_file_location(module_name, path)
@@ -63,6 +68,19 @@ class PluginManager:
             spec.loader.exec_module(module)
             plugin = getattr(module, "plugin", None)
             self._validate_plugin(plugin, str(path))
+            configure = getattr(plugin, "configure", None)
+            plugin_config = {
+                name: value
+                for name, value in config.items()
+                if name != "enabled"
+            }
+
+            if callable(configure):
+                configure(plugin_config)
+            elif plugin_config:
+                raise TypeError(
+                    f"Plugin config requires callable configure(): {path}"
+                )
         except BaseException:
             if previous_module is None:
                 sys.modules.pop(module_name, None)
@@ -84,4 +102,4 @@ class PluginManager:
                 f"Plugin must provide callable speakers() and synthesize(): {source}"
             )
 
-plugin_manager = PluginManager(enabled=settings.plugins)
+plugin_manager = PluginManager(configs=settings.plugins)

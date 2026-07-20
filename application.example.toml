@@ -9,4 +9,4 @@ max_sessions = 10
 max_text_length = 500
 
 [plugins]
-voicevox = true
+voicevox = { enabled = true, base_url = "http://127.0.0.1:50021" }

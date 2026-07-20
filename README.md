@@ -37,11 +37,12 @@ max_sessions = 10
 max_text_length = 500
 
 [plugins]
-voicevox = true
+voicevox = { enabled = true, base_url = "http://127.0.0.1:50021" }
 ```
 
-Pluginは設定に名前があり、値が`true`の場合だけ読み込まれます。設定変更後は
-サーバーを再起動してください。初期パスワードのままでは起動しません。
+Pluginは設定に名前があり、`enabled`が`true`の場合だけ読み込まれます。
+それ以外の値はPlugin固有の設定として渡されます。設定変更後はサーバーを
+再起動してください。初期パスワードのままでは起動しません。
 外部公開時のHTTPS化はリバースプロキシ側で行ってください。
 
 リポジトリのルートからサーバーを起動します。
@@ -157,6 +158,9 @@ API Sessionを作り直します。未完了の発話は再送するため、切
 from utils.models import AudioData
 
 class Plugin:
+    def configure(self, config) -> None:
+        self.endpoint = config["endpoint"]
+
     async def speakers(self) -> list[str]:
         return ["speaker"]
 
@@ -169,11 +173,13 @@ class Plugin:
 plugin = Plugin()
 ```
 
-`speakers`と`synthesize`は必須、`styles`は任意です。Pluginはサーバープロセスと
-同じ権限で実行されるため、管理者が確認した信頼済みコードだけを配置してください。
+`speakers`と`synthesize`は必須、`styles`は任意です。Plugin固有の設定を
+使用する場合は同期`configure`を実装します。`configure`には`enabled`を除いた
+設定が渡されます。Pluginはサーバープロセスと同じ権限で実行されるため、管理者が
+確認した信頼済みコードだけを配置してください。
 
-VOICEVOX Pluginは`VOICEVOX_URL`で接続先を変更できます。既定値は
-`http://127.0.0.1:50021`です。
+VOICEVOX Pluginは`base_url`で接続先を変更できます。未指定の場合は
+`VOICEVOX_URL`、それも未指定なら`http://127.0.0.1:50021`を使用します。
 
 ## テスト
 
