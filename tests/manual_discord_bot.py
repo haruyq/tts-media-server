@@ -41,6 +41,7 @@ class TTSBot(discord.Client):
         self.voice_state: dict[str, Any] | None = None
         self.voice_server: dict[str, Any] | None = None
         self.voice_ready = asyncio.Event()
+        self.speaking = asyncio.Event()
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.websocket: aiohttp.ClientWebSocketResponse | None = None
         self.run_task: asyncio.Task[None] | None = None
@@ -132,6 +133,11 @@ class TTSBot(discord.Client):
             while True:
                 event = await websocket.receive_json()
                 op = event.get("op")
+
+                if op == "speech.started":
+                    self.speaking.set()
+                elif op in terminal_events:
+                    self.speaking.clear()
 
                 if op in {"error", "speech.failed"}:
                     print(f"読み上げに失敗しました: {event['data'].get('message')}")
@@ -225,6 +231,8 @@ class TTSBot(discord.Client):
                 async with session.ws_connect(self.websocket_url()) as websocket:
                     ready = await websocket.receive_json()
 
+                    print(f"WebSocketイベント: {ready.get('op')}")
+
                     if ready.get("op") != "session.ready":
                         raise RuntimeError(f"予期しない応答です: {ready}")
 
@@ -247,6 +255,8 @@ class TTSBot(discord.Client):
         except Exception:
             traceback.print_exc()
         finally:
+            self.speaking.clear()
+
             try:
                 if guild is not None:
                     await guild.change_voice_state(channel=None)
