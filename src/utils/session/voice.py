@@ -1,14 +1,14 @@
 import asyncio
 from pathlib import Path
 
-from utils.discord.dummybackend import DummyVoiceBackend
+from utils.discord.backend import DiscordVoiceBackend
 from utils.logger import Logger
 from utils.models import AudioData, VoiceCredentials
 
 Log = Logger(__name__)
 
 class VoiceSession:
-    def __init__(self, backend: DummyVoiceBackend) -> None:
+    def __init__(self, backend: DiscordVoiceBackend) -> None:
         self.backend = backend
         self.queue: asyncio.Queue[Path | AudioData] = asyncio.Queue()
         self.worker: asyncio.Task[None] | None = None

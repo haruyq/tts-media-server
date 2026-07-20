@@ -24,7 +24,7 @@ class VoiceSessionTest(unittest.IsolatedAsyncioTestCase):
     async def test_stop_keeps_worker_ready(self):
         backend = VoiceBackend()
         session = VoiceSession(backend)
-        credentials = VoiceCredentials(1, 2, "session", "endpoint", "token")
+        credentials = VoiceCredentials(1, 2, 3, "session", "endpoint", "token")
         await session.connect(credentials)
         await session.play(Path("audio.wav"))
         await asyncio.wait_for(backend.started.wait(), 1)

@@ -1,4 +1,4 @@
-from utils.discord.dummybackend import DummyVoiceBackend
+from utils.discord.backend import DiscordVoiceBackend
 from utils.session.voice import VoiceSession
 from utils.models import VoiceCredentials
 from utils.exceptions import SessionAlreadyExists, SessionNotFound
@@ -18,7 +18,7 @@ class SessionManager:
         if session_id in self._sessions:
             raise SessionAlreadyExists(session_id)
 
-        backend = DummyVoiceBackend()
+        backend = DiscordVoiceBackend()
         session = VoiceSession(backend)
 
         try:
