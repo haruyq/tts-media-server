@@ -5,7 +5,9 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from utils.config import settings
 from utils.exceptions import SessionAlreadyExists, SessionNotFound
+from utils.logger import Logger
 from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
 from utils.plugins import PluginManager, TTSPlugin
 from utils.session.manager import SessionManager
@@ -13,6 +15,7 @@ from utils.session.voice import VoiceSession
 
 credentials_adapter = TypeAdapter(VoiceCredentials)
 speech_adapter = TypeAdapter(SpeechRequest)
+Log = Logger(__name__)
 
 class SessionProtocol:
     def __init__(
@@ -82,10 +85,16 @@ class SessionProtocol:
         if not request.text.strip():
             raise ValueError("textを指定してください")
 
+        if len(request.text) > settings.limits.max_text_length:
+            raise ValueError(
+                f"textは{settings.limits.max_text_length}文字以内で指定してください"
+            )
+
         plugin = self.plugins.get(request.plugin)
         return self._start_playback(
             lambda: self._synthesize_and_play(session, plugin, request),
             "speech",
+            initial_event="speech.accepted",
             plugin=request.plugin,
             speaker=request.speaker,
         )
@@ -126,26 +135,32 @@ class SessionProtocol:
         self,
         create_operation: Callable[[], Awaitable[None]],
         event: str,
+        initial_event: str | None = None,
         **data: Any,
     ) -> dict[str, Any]:
         if self.playback_task is not None:
             raise ValueError("別の音声を再生中です")
 
         self.playback_task = asyncio.create_task(
-            self._run_playback(create_operation(), event, data)
+            self._run_playback(create_operation, event, data)
         )
-        return self.response(f"{event}.started", **data)
+        return self.response(initial_event or f"{event}.started", **data)
 
     async def _run_playback(
         self,
-        operation: Awaitable[None],
+        create_operation: Callable[[], Awaitable[None]],
         event: str,
         data: dict[str, Any],
     ) -> None:
         try:
             try:
-                await operation
+                await create_operation()
             except Exception as exception:
+                Log.exception(
+                    "音声処理に失敗しました: event=%s data=%s",
+                    event,
+                    data,
+                )
                 response = self.response(
                     f"{event}.failed",
                     message=str(exception),
@@ -173,7 +188,17 @@ class SessionProtocol:
             request.speaker,
             request.options,
         )
-        await session.play(audio)
+
+        async def started() -> None:
+            await self.emit(
+                self.response(
+                    "speech.started",
+                    plugin=request.plugin,
+                    speaker=request.speaker,
+                )
+            )
+
+        await session.play(audio, started)
 
     async def _cancel_playback(self) -> None:
         task = self.playback_task
@@ -187,6 +212,9 @@ class SessionProtocol:
             await task
         except asyncio.CancelledError:
             pass
+        finally:
+            if self.playback_task is task:
+                self.playback_task = None
 
     def response(self, op: str, **data: Any) -> dict[str, Any]:
         return {

@@ -1,0 +1,13 @@
+[server]
+ip = "127.0.0.1"
+port = 8000
+debug = false
+password = "change-me-before-exposing"
+
+[limits]
+max_sessions = 10
+max_text_length = 500
+queue_size = 100
+
+[plugins]
+voicevox = true

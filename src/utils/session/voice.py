@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from utils.discord.backend import DiscordVoiceBackend
@@ -12,11 +13,15 @@ class VoiceSession:
     async def connect(self, credentials: "VoiceCredentials") -> None:
         await self.backend.connect(credentials)
 
-    async def play(self, audio: Path | AudioData) -> None:
+    async def play(
+        self,
+        audio: Path | AudioData,
+        started: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         if self.playback is not None:
             raise RuntimeError("別の音声を再生中です")
 
-        playback = asyncio.create_task(self.backend.play(audio))
+        playback = asyncio.create_task(self.backend.play(audio, started))
         self.playback = playback
 
         try:

@@ -2,6 +2,7 @@ import asyncio
 import unittest
 from pathlib import Path
 
+from utils.config import settings
 from utils.exceptions import SessionNotFound
 from utils.models import AudioData, VoiceCredentials, WebSocketCommand
 from utils.session.protocol import SessionProtocol
@@ -12,7 +13,10 @@ class VoiceSession:
         self.stopped = False
         self.closed = False
 
-    async def play(self, audio: Path | AudioData) -> None:
+    async def play(self, audio: Path | AudioData, started=None) -> None:
+        if started is not None:
+            await started()
+
         self.played.append(audio)
 
     async def stop(self) -> None:
@@ -70,6 +74,15 @@ class BlockingTTSPlugin:
         self.started.set()
         await asyncio.Event().wait()
 
+class FailingTTSPlugin:
+    async def synthesize(
+        self,
+        text: str,
+        speaker: str,
+        options: dict,
+    ) -> AudioData:
+        raise RuntimeError("合成失敗")
+
 class PluginManager:
     def __init__(self) -> None:
         self.plugin = TTSPlugin()
@@ -125,7 +138,8 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
 
         blocking_plugin = BlockingTTSPlugin()
         plugins.plugin = blocking_plugin
-        cancelled_started = await protocol.handle(
+        event_count = len(events)
+        cancelled_accepted = await protocol.handle(
             WebSocketCommand(
                 "speech.play",
                 {
@@ -136,20 +150,26 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
             )
         )
         await asyncio.wait_for(blocking_plugin.started.wait(), 1)
+        self.assertEqual(len(events), event_count)
         stopped = await protocol.handle(WebSocketCommand("playback.stop"))
 
         self.assertEqual(created["op"], "session.created")
         self.assertIsInstance(manager.credentials, VoiceCredentials)
         self.assertEqual(playback_started["op"], "playback.started")
-        self.assertEqual(speech_started["op"], "speech.started")
-        self.assertEqual(cancelled_started["op"], "speech.started")
+        self.assertEqual(speech_started["op"], "speech.accepted")
+        self.assertEqual(cancelled_accepted["op"], "speech.accepted")
         self.assertEqual(
             session.played,
             [Path("audio.wav"), AudioData("こんにちは".encode())],
         )
         self.assertEqual(
             [event["op"] for event in events],
-            ["playback.finished", "speech.finished", "speech.stopped"],
+            [
+                "playback.finished",
+                "speech.started",
+                "speech.finished",
+                "speech.stopped",
+            ],
         )
         self.assertEqual(stopped["op"], "playback.stopped")
         self.assertTrue(session.stopped)
@@ -182,3 +202,95 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         await replacement_protocol.close()
 
         self.assertIs(manager.get("test"), replacement)
+
+    async def test_text_length_limit(self):
+        manager = SessionManager()
+        session = VoiceSession()
+        manager.sessions["test"] = session
+        events = []
+
+        async def emit(event: dict) -> None:
+            events.append(event)
+
+        protocol = SessionProtocol("test", manager, PluginManager(), emit)
+        protocol.session = session
+        command = {
+            "plugin": "voicevox",
+            "speaker": "ずんだもん",
+            "text": "x" * settings.limits.max_text_length,
+        }
+        accepted = await protocol.handle(WebSocketCommand("speech.play", command))
+        await protocol.playback_task
+
+        self.assertEqual(accepted["op"], "speech.accepted")
+        self.assertEqual(
+            [event["op"] for event in events],
+            ["speech.started", "speech.finished"],
+        )
+
+        command["text"] += "x"
+
+        with self.assertRaisesRegex(ValueError, "文字以内"):
+            await protocol.handle(WebSocketCommand("speech.play", command))
+
+    async def test_immediate_stop_allows_next_playback(self):
+        manager = SessionManager()
+        session = VoiceSession()
+        manager.sessions["test"] = session
+        events = []
+
+        async def emit(event: dict) -> None:
+            events.append(event)
+
+        protocol = SessionProtocol("test", manager, PluginManager(), emit)
+        protocol.session = session
+        command = WebSocketCommand(
+            "speech.play",
+            {
+                "plugin": "voicevox",
+                "speaker": "ずんだもん",
+                "text": "こんにちは",
+            },
+        )
+
+        await protocol.handle(command)
+        await protocol.handle(WebSocketCommand("playback.stop"))
+
+        self.assertIsNone(protocol.playback_task)
+
+        await protocol.handle(command)
+        await protocol.playback_task
+
+        self.assertEqual(
+            [event["op"] for event in events],
+            ["speech.started", "speech.finished"],
+        )
+
+    async def test_playback_failure_is_logged(self):
+        manager = SessionManager()
+        session = VoiceSession()
+        manager.sessions["test"] = session
+        plugins = PluginManager()
+        plugins.plugin = FailingTTSPlugin()
+        events = []
+
+        async def emit(event: dict) -> None:
+            events.append(event)
+
+        protocol = SessionProtocol("test", manager, plugins, emit)
+        protocol.session = session
+
+        with self.assertLogs("utils.session.protocol", "ERROR"):
+            await protocol.handle(
+                WebSocketCommand(
+                    "speech.play",
+                    {
+                        "plugin": "voicevox",
+                        "speaker": "ずんだもん",
+                        "text": "失敗",
+                    },
+                )
+            )
+            await protocol.playback_task
+
+        self.assertEqual(events[0]["op"], "speech.failed")

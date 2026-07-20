@@ -1,9 +1,9 @@
 import sys
-from importlib.metadata import entry_points
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Protocol
 
+from utils.config import settings
 from utils.exceptions import PluginNotFound
 from utils.models import AudioData
 from utils.logger import Logger
@@ -23,17 +23,18 @@ class TTSPlugin(Protocol):
         ...
 
 class PluginManager:
-    def __init__(self, plugins_dir: Path = Path("plugins")) -> None:
-        self._plugins: dict[str, TTSPlugin] = {
-            entry.name: entry.load()
-            for entry in entry_points(group="tts_media_server.plugins")
-        }
-
-        for plugin_name, plugin in self._plugins.items():
-            self._validate_plugin(plugin, plugin_name)
+    def __init__(
+        self,
+        plugins_dir: Path = Path("plugins"),
+        enabled: dict[str, bool] | None = None,
+    ) -> None:
+        self._plugins: dict[str, TTSPlugin] = {}
 
         for path in sorted(plugins_dir.glob("*.py")):
-            if not path.name.startswith("_"):
+            if (
+                not path.name.startswith("_")
+                and (enabled is None or enabled.get(path.stem, False))
+            ):
                 self._load_file(path)
 
     @property
@@ -48,10 +49,6 @@ class PluginManager:
 
     def _load_file(self, path: Path) -> None:
         plugin_name = path.stem
-
-        if plugin_name in self._plugins:
-            raise ValueError(f"プラグイン名が重複しています: {plugin_name}")
-
         module_name = f"_tts_media_server_plugin_{plugin_name}"
         spec = spec_from_file_location(module_name, path)
 
@@ -87,4 +84,4 @@ class PluginManager:
                 f"plugin.speakersとplugin.synthesizeが必要です: {source}"
             )
 
-plugin_manager = PluginManager()
+plugin_manager = PluginManager(enabled=settings.plugins)

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+from pathlib import Path
+import tomllib
 import traceback
 from typing import Any
 
@@ -18,8 +20,16 @@ class TTSBot(discord.Client):
         plugin: str,
         speaker: str,
         style: str | None,
+        password: str,
+        queue_size: int,
         speech_timeout: float,
     ) -> None:
+        if not password:
+            raise ValueError("server.passwordを設定してください")
+
+        if queue_size <= 0:
+            raise ValueError("limits.queue_sizeは0より大きくしてください")
+
         if speech_timeout <= 0:
             raise ValueError("TTS_SPEECH_TIMEOUTは0より大きくしてください")
 
@@ -37,12 +47,15 @@ class TTSBot(discord.Client):
         self.plugin = plugin
         self.speaker = speaker
         self.style = style
+        self.password = password
         self.speech_timeout = speech_timeout
         self.voice_state: dict[str, Any] | None = None
         self.voice_server: dict[str, Any] | None = None
         self.voice_ready = asyncio.Event()
+        self.reconnect = asyncio.Event()
         self.speaking = asyncio.Event()
-        self.queue: asyncio.Queue[str] = asyncio.Queue()
+        self.queue: asyncio.Queue[str] = asyncio.Queue(maxsize=queue_size)
+        self.pending_text: str | None = None
         self.websocket: aiohttp.ClientWebSocketResponse | None = None
         self.run_task: asyncio.Task[None] | None = None
 
@@ -56,14 +69,16 @@ class TTSBot(discord.Client):
             or message.guild is None
             or message.guild.id != self.guild_id
             or message.channel.id != self.text_channel_id
-            or self.websocket is None
         ):
             return
 
         text = message.clean_content.strip()
 
         if text:
-            await self.queue.put(text)
+            try:
+                self.queue.put_nowait(text)
+            except asyncio.QueueFull:
+                await message.channel.send("読み上げキューが満杯です")
 
     async def on_socket_raw_receive(self, message: str | bytes) -> None:
         try:
@@ -82,15 +97,42 @@ class TTSBot(discord.Client):
             and self.user is not None
             and str(data.get("user_id")) == str(self.user.id)
             and str(data.get("guild_id")) == str(self.guild_id)
-            and str(data.get("channel_id")) == str(self.voice_channel_id)
         ):
-            self.voice_state = data
+            if str(data.get("channel_id")) == str(self.voice_channel_id):
+                previous = self.voice_state
+                self.voice_state = data
+
+                if (
+                    previous is not None
+                    and previous.get("session_id") != data.get("session_id")
+                ):
+                    self.reconnect.set()
+            else:
+                self.voice_state = None
+                self.voice_server = None
+                self.voice_ready.clear()
+                self.reconnect.set()
         elif (
             event == "VOICE_SERVER_UPDATE"
             and str(data.get("guild_id")) == str(self.guild_id)
-            and data.get("endpoint")
         ):
-            self.voice_server = data
+            previous = self.voice_server
+
+            if data.get("endpoint"):
+                self.voice_server = data
+
+                if previous is not None and (
+                    previous.get("endpoint"),
+                    previous.get("token"),
+                ) != (
+                    data.get("endpoint"),
+                    data.get("token"),
+                ):
+                    self.reconnect.set()
+            else:
+                self.voice_server = None
+                self.voice_ready.clear()
+                self.reconnect.set()
 
         if self.voice_state is not None and self.voice_server is not None:
             self.voice_ready.set()
@@ -114,7 +156,7 @@ class TTSBot(discord.Client):
 
     async def wait_for_speech(
         self,
-        websocket: aiohttp.ClientWebSocketResponse,
+        events: asyncio.Queue[dict[str, Any]],
         timeout: float,
         stopping: bool = False,
     ) -> str:
@@ -131,7 +173,7 @@ class TTSBot(discord.Client):
 
         async with asyncio.timeout(timeout):
             while True:
-                event = await websocket.receive_json()
+                event = await events.get()
                 op = event.get("op")
 
                 if op == "speech.started":
@@ -145,54 +187,135 @@ class TTSBot(discord.Client):
                 if op in terminal_events:
                     return op
 
+    async def receive_events(
+        self,
+        websocket: aiohttp.ClientWebSocketResponse,
+        events: asyncio.Queue[dict[str, Any]],
+    ) -> None:
+        while True:
+            await events.put(await websocket.receive_json())
+
     async def read_queue(
         self,
         websocket: aiohttp.ClientWebSocketResponse,
+        events: asyncio.Queue[dict[str, Any]],
     ) -> None:
         while True:
-            text = await self.queue.get()
+            if self.pending_text is None:
+                self.pending_text = await self.queue.get()
+
+            await websocket.send_json({
+                "op": "speech.play",
+                "data": {
+                    "plugin": self.plugin,
+                    "speaker": self.speaker,
+                    "text": self.pending_text,
+                    "options": (
+                        {"style": self.style}
+                        if self.style
+                        else {}
+                    ),
+                },
+            })
 
             try:
-                await websocket.send_json({
-                    "op": "speech.play",
-                    "data": {
-                        "plugin": self.plugin,
-                        "speaker": self.speaker,
-                        "text": text,
-                        "options": (
-                            {"style": self.style}
-                            if self.style
-                            else {}
-                        ),
-                    },
-                })
+                event = await self.wait_for_speech(
+                    events,
+                    self.speech_timeout,
+                )
+            except TimeoutError:
+                print("読み上げがタイムアウトしたため停止します")
+                await websocket.send_json({"op": "playback.stop"})
+
                 try:
                     event = await self.wait_for_speech(
-                        websocket,
-                        self.speech_timeout,
+                        events,
+                        10,
+                        stopping=True,
                     )
                 except TimeoutError:
-                    print("読み上げがタイムアウトしたため停止します")
-                    await websocket.send_json({"op": "playback.stop"})
+                    await websocket.close()
+                    raise RuntimeError("読み上げを停止できませんでした")
 
-                    try:
-                        event = await self.wait_for_speech(
-                            websocket,
-                            10,
-                            stopping=True,
-                        )
-                    except TimeoutError:
-                        await websocket.close()
-                        raise RuntimeError("読み上げを停止できませんでした")
+            self.pending_text = None
+            self.queue.task_done()
 
-                if event == "session.closed":
-                    return
-            finally:
-                self.queue.task_done()
+            if event == "session.closed":
+                return
 
     def websocket_url(self) -> str:
         base_url = self.api_url.replace("http", "ws", 1)
         return f"{base_url}/api/sessions/{self.session_id}/ws"
+
+    async def run_websocket(self, session: aiohttp.ClientSession) -> bool:
+        self.reconnect.clear()
+        credentials = {
+            "guild_id": self.guild_id,
+            "channel_id": self.voice_channel_id,
+            "user_id": self.user.id,
+            "voice_session_id": self.voice_state["session_id"],
+            "endpoint": self.voice_server["endpoint"],
+            "token": self.voice_server["token"],
+        }
+
+        async with session.ws_connect(
+            self.websocket_url(),
+            headers={"Authorization": f"Bearer {self.password}"},
+        ) as websocket:
+            ready = await websocket.receive_json()
+
+            print(f"WebSocketイベント: {ready.get('op')}")
+
+            if ready.get("op") != "session.ready":
+                raise RuntimeError(f"予期しない応答です: {ready}")
+
+            created = await self.command(
+                websocket,
+                "session.create",
+                credentials,
+            )
+
+            if created.get("op") != "session.created":
+                raise RuntimeError(f"予期しない応答です: {created}")
+
+            self.websocket = websocket
+            print("読み上げを開始しました")
+            events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+            receiver = asyncio.create_task(
+                self.receive_events(websocket, events)
+            )
+            reader = asyncio.create_task(self.read_queue(websocket, events))
+            reconnect = asyncio.create_task(self.reconnect.wait())
+
+            try:
+                done, _ = await asyncio.wait(
+                    {receiver, reader, reconnect},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if reconnect in done:
+                    return True
+
+                if receiver in done:
+                    await receiver
+                    return False
+
+                await reader
+                return False
+            finally:
+                self.websocket = None
+                self.speaking.clear()
+
+                for task in (receiver, reader, reconnect):
+                    if not task.done():
+                        task.cancel()
+
+                await asyncio.gather(
+                    receiver,
+                    reader,
+                    reconnect,
+                    return_exceptions=True,
+                )
 
     async def run_session(self) -> None:
         guild = None
@@ -210,48 +333,40 @@ class TTSBot(discord.Client):
                     f"Voice Channelが見つかりません: {self.voice_channel_id}"
                 )
 
-            print(f"Voice Channelへ参加します: {channel}")
-            await guild.change_voice_state(
-                channel=channel,
-                self_deaf=True,
-                self_mute=False,
-            )
-            await asyncio.wait_for(self.voice_ready.wait(), timeout=15.0)
-
-            credentials = {
-                "guild_id": self.guild_id,
-                "channel_id": self.voice_channel_id,
-                "user_id": self.user.id,
-                "voice_session_id": self.voice_state["session_id"],
-                "endpoint": self.voice_server["endpoint"],
-                "token": self.voice_server["token"],
-            }
-
             async with aiohttp.ClientSession() as session:
-                async with session.ws_connect(self.websocket_url()) as websocket:
-                    ready = await websocket.receive_json()
+                delay = 1
 
-                    print(f"WebSocketイベント: {ready.get('op')}")
-
-                    if ready.get("op") != "session.ready":
-                        raise RuntimeError(f"予期しない応答です: {ready}")
-
-                    created = await self.command(
-                        websocket,
-                        "session.create",
-                        credentials,
-                    )
-
-                    if created.get("op") != "session.created":
-                        raise RuntimeError(f"予期しない応答です: {created}")
-
-                    self.websocket = websocket
-                    print("読み上げを開始しました")
+                while not self.is_closed():
+                    started = asyncio.get_running_loop().time()
 
                     try:
-                        await self.read_queue(websocket)
-                    finally:
-                        self.websocket = None
+                        if not self.voice_ready.is_set():
+                            print(f"Voice Channelへ参加します: {channel}")
+                            await guild.change_voice_state(
+                                channel=channel,
+                                self_deaf=True,
+                                self_mute=False,
+                            )
+                            await asyncio.wait_for(
+                                self.voice_ready.wait(),
+                                timeout=15.0,
+                            )
+
+                        credentials_changed = await self.run_websocket(session)
+                    except Exception:
+                        traceback.print_exc()
+                        credentials_changed = False
+
+                    if credentials_changed:
+                        delay = 1
+                        continue
+
+                    if asyncio.get_running_loop().time() - started >= 30:
+                        delay = 1
+
+                    print(f"APIへ{delay}秒後に再接続します")
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, 30)
         except Exception:
             traceback.print_exc()
         finally:
@@ -271,16 +386,39 @@ def required(name: str) -> str:
 
     return value
 
+def application_config() -> dict[str, Any]:
+    path = Path(__file__).resolve().parents[1] / "application.toml"
+
+    with path.open("rb") as file:
+        return tomllib.load(file)
+
+def client_url(ip: str, port: int) -> str:
+    if ip == "0.0.0.0":
+        ip = "127.0.0.1"
+    elif ip == "::":
+        ip = "::1"
+
+    host = f"[{ip}]" if ":" in ip else ip
+    return f"http://{host}:{port}"
+
 def main() -> None:
+    config = application_config()
+    server = config["server"]
+    limits = config["limits"]
     bot = TTSBot(
         int(required("DISCORD_GUILD_ID")),
         int(required("DISCORD_VOICE_CHANNEL_ID")),
         int(required("DISCORD_TEXT_CHANNEL_ID")),
-        os.environ.get("TTS_MEDIA_SERVER_URL", "http://127.0.0.1:8000"),
+        os.environ.get(
+            "TTS_MEDIA_SERVER_URL",
+            client_url(server["ip"], server["port"]),
+        ),
         os.environ.get("TTS_SESSION_ID", "manual-test"),
         os.environ.get("TTS_PLUGIN", "voicevox"),
         os.environ.get("TTS_SPEAKER", "ずんだもん"),
         os.environ.get("TTS_STYLE"),
+        server["password"],
+        limits["queue_size"],
         float(os.environ.get("TTS_SPEECH_TIMEOUT", "120")),
     )
     bot.run(required("DISCORD_BOT_TOKEN"))

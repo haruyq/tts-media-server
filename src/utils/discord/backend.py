@@ -1,5 +1,6 @@
 import asyncio
 import io
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from pathlib import Path
 
@@ -41,7 +42,11 @@ class DiscordVoiceBackend:
             f"channel_id={credentials.channel_id}, user_id={credentials.user_id}"
         )
 
-    async def play(self, audio: Path | AudioData) -> None:
+    async def play(
+        self,
+        audio: Path | AudioData,
+        started: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
         voice = self.voice
 
         if voice is None or not voice.is_connected():
@@ -70,8 +75,14 @@ class DiscordVoiceBackend:
             raise
 
         try:
+            if started is not None:
+                await started()
+
             await completed
         except asyncio.CancelledError:
+            voice.stop()
+            raise
+        except Exception:
             voice.stop()
             raise
 

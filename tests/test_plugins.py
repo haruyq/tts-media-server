@@ -11,23 +11,6 @@ from utils.models import AudioData
 from utils.plugins import PluginManager
 
 class PluginManagerTest(unittest.TestCase):
-    def test_loads_plugins(self):
-        plugin = SimpleNamespace(
-            speakers=AsyncMock(return_value=["speaker"]),
-            synthesize=AsyncMock(),
-        )
-        entry = SimpleNamespace(name="test", load=lambda: plugin)
-
-        with TemporaryDirectory() as directory:
-            with patch("utils.plugins.entry_points", return_value=[entry]):
-                manager = PluginManager(Path(directory))
-
-        self.assertEqual(manager.names, ["test"])
-        self.assertIs(manager.get("test"), plugin)
-
-        with self.assertRaises(PluginNotFound):
-            manager.get("missing")
-
     def test_loads_plugin_file(self):
         with TemporaryDirectory() as directory:
             plugin_path = Path(directory, "demo.py")
@@ -43,12 +26,16 @@ class PluginManagerTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("utils.plugins.entry_points", return_value=[]):
-                manager = PluginManager(Path(directory))
+            manager = PluginManager(Path(directory))
+            disabled = PluginManager(Path(directory), {})
 
         self.assertEqual(manager.names, ["demo"])
+        self.assertEqual(disabled.names, [])
         self.assertTrue(callable(manager.get("demo").speakers))
         self.assertTrue(callable(manager.get("demo").synthesize))
+
+        with self.assertRaises(PluginNotFound):
+            manager.get("missing")
 
     def test_rejects_invalid_plugin_file(self):
         with TemporaryDirectory() as directory:
@@ -57,9 +44,8 @@ class PluginManagerTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            with patch("utils.plugins.entry_points", return_value=[]):
-                with self.assertRaisesRegex(TypeError, "invalid.py"):
-                    PluginManager(Path(directory))
+            with self.assertRaisesRegex(TypeError, "invalid.py"):
+                PluginManager(Path(directory))
 
 class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
     async def test_synthesizes_audio(self):
@@ -108,8 +94,7 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
             os.environ,
             {"VOICEVOX_URL": "http://voicevox:50021"},
         ):
-            with patch("utils.plugins.entry_points", return_value=[]):
-                plugin = PluginManager(plugins_dir).get("voicevox")
+            plugin = PluginManager(plugins_dir).get("voicevox")
 
         with patch("aiohttp.ClientSession", return_value=session):
             speaker_names = await plugin.speakers()

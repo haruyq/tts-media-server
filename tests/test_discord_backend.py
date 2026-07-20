@@ -1,6 +1,6 @@
 import unittest
 from io import BytesIO
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from utils.discord.backend import DiscordVoiceBackend
 from utils.discord.client import ExternalVoiceClient
@@ -48,12 +48,32 @@ class DiscordVoiceBackendTest(unittest.IsolatedAsyncioTestCase):
         voice = VoiceClient()
         backend.voice = voice
         source = Mock()
+        started = Mock()
+
+        async def on_started():
+            started()
 
         with patch("utils.discord.backend.FFmpegOpusAudio", return_value=source) as ffmpeg:
-            await backend.play(AudioData(b"audio"))
+            await backend.play(AudioData(b"audio"), on_started)
 
         self.assertIs(voice.source, source)
+        started.assert_called_once_with()
         input_audio = ffmpeg.call_args.args[0]
         self.assertIsInstance(input_audio, BytesIO)
         self.assertEqual(input_audio.getvalue(), b"audio")
         self.assertTrue(ffmpeg.call_args.kwargs["pipe"])
+
+    async def test_does_not_report_started_when_play_fails(self):
+        backend = DiscordVoiceBackend()
+        voice = VoiceClient()
+        voice.play = Mock(side_effect=RuntimeError("再生失敗"))
+        backend.voice = voice
+        source = Mock()
+        started = AsyncMock()
+
+        with patch("utils.discord.backend.FFmpegOpusAudio", return_value=source):
+            with self.assertRaisesRegex(RuntimeError, "再生失敗"):
+                await backend.play(AudioData(b"audio"), started)
+
+        started.assert_not_awaited()
+        source.cleanup.assert_called_once_with()

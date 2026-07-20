@@ -13,7 +13,6 @@ class VoiceCredentials:
 @dataclass(frozen=True)
 class AudioData:
     data: bytes = field(repr=False)
-    media_type: str = "audio/wav"
 
 @dataclass(frozen=True)
 class SpeechRequest:
