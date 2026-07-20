@@ -20,10 +20,10 @@ class DiscordVoiceBackend:
 
     async def connect(self, credentials: VoiceCredentials) -> None:
         if self.voice is not None:
-            raise RuntimeError("Discord Voiceにはすでに接続しています")
+            raise RuntimeError("Already connected to Discord Voice")
 
         if not credentials.endpoint.removeprefix("wss://").rstrip("/"):
-            raise ValueError("Voice endpointが空です")
+            raise ValueError("Voice endpoint must not be empty")
 
         http = VoiceHTTPClient()
         voice = ExternalVoiceClient(credentials, http)
@@ -38,7 +38,7 @@ class DiscordVoiceBackend:
             raise
 
         Log.info(
-            f"connected: guild_id={credentials.guild_id}, "
+            f"Connected to Discord Voice: guild_id={credentials.guild_id}, "
             f"channel_id={credentials.channel_id}, user_id={credentials.user_id}"
         )
 
@@ -50,7 +50,7 @@ class DiscordVoiceBackend:
         voice = self.voice
 
         if voice is None or not voice.is_connected():
-            raise RuntimeError("Discord Voiceに接続していません")
+            raise RuntimeError("Not connected to Discord Voice")
 
         source = self._create_source(audio)
         loop = asyncio.get_running_loop()
@@ -99,12 +99,12 @@ class DiscordVoiceBackend:
     def _create_source(self, audio: Path | AudioData) -> FFmpegOpusAudio:
         if isinstance(audio, Path):
             if not audio.is_file():
-                raise FileNotFoundError(audio)
+                raise FileNotFoundError(f"Audio file not found: {audio}")
 
             return FFmpegOpusAudio(str(audio))
 
         if not audio.data:
-            raise ValueError("音声データが空です")
+            raise ValueError("Audio data must not be empty")
 
         return FFmpegOpusAudio(io.BytesIO(audio.data), pipe=True)
 
@@ -132,4 +132,4 @@ class DiscordVoiceBackend:
             if http is not None:
                 await http.close()
 
-        Log.info("closed")
+        Log.info("Disconnected from Discord Voice")

@@ -53,7 +53,7 @@ class PluginManager:
         spec = spec_from_file_location(module_name, path)
 
         if spec is None or spec.loader is None:
-            raise ImportError(f"プラグインを読み込めません: {path}")
+            raise ImportError(f"Unable to load plugin: {path}")
 
         module = module_from_spec(spec)
         previous_module = sys.modules.get(module_name)
@@ -71,7 +71,7 @@ class PluginManager:
 
             raise
 
-        Log.info(f"プラグインを読み込みました: {plugin_name} ({path})")
+        Log.info(f"Loaded plugin: {plugin_name} ({path})")
 
         self._plugins[plugin_name] = plugin
 
@@ -81,7 +81,7 @@ class PluginManager:
             or not callable(getattr(plugin, "synthesize", None))
         ):
             raise TypeError(
-                f"plugin.speakersとplugin.synthesizeが必要です: {source}"
+                f"Plugin must provide callable speakers() and synthesize(): {source}"
             )
 
 plugin_manager = PluginManager(enabled=settings.plugins)

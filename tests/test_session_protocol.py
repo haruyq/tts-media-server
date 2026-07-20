@@ -230,7 +230,7 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
 
         command["text"] += "x"
 
-        with self.assertRaisesRegex(ValueError, "文字以内"):
+        with self.assertRaisesRegex(ValueError, "at most"):
             await protocol.handle(WebSocketCommand("speech.play", command))
 
     async def test_immediate_stop_allows_next_playback(self):
@@ -280,7 +280,7 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         protocol = SessionProtocol("test", manager, plugins, emit)
         protocol.session = session
 
-        with self.assertLogs("utils.session.protocol", "ERROR"):
+        with self.assertLogs("utils.session.protocol", "ERROR") as logs:
             await protocol.handle(
                 WebSocketCommand(
                     "speech.play",
@@ -293,4 +293,5 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
             )
             await protocol.playback_task
 
+        self.assertIn("Audio operation failed", logs.output[0])
         self.assertEqual(events[0]["op"], "speech.failed")

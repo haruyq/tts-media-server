@@ -19,7 +19,7 @@ class VoiceSession:
         started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if self.playback is not None:
-            raise RuntimeError("別の音声を再生中です")
+            raise RuntimeError("Another audio playback is already in progress")
 
         playback = asyncio.create_task(self.backend.play(audio, started))
         self.playback = playback

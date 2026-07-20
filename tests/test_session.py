@@ -151,7 +151,7 @@ class VoiceSessionTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manager._creating, {})
 
-        with self.assertRaisesRegex(RuntimeError, "終了"):
+        with self.assertRaisesRegex(RuntimeError, "closed"):
             await manager.create("second", credentials)
 
     async def test_manager_reserves_session_while_closing(self):

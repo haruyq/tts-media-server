@@ -53,7 +53,7 @@ class SessionProtocol:
             "playback.stop",
             "speech.play",
         }:
-            raise ValueError(f"未対応の操作です: {command.op}")
+            raise ValueError(f"Unsupported operation: {command.op}")
 
         session = self._get_session()
 
@@ -61,7 +61,7 @@ class SessionProtocol:
             path = command.data.get("path")
 
             if not isinstance(path, str) or not path:
-                raise ValueError("pathには空でない文字列を指定してください")
+                raise ValueError("path must be a non-empty string")
 
             return self._start_playback(
                 lambda: session.play(Path(path)),
@@ -77,17 +77,17 @@ class SessionProtocol:
         request = speech_adapter.validate_python(command.data)
 
         if not request.plugin:
-            raise ValueError("pluginを指定してください")
+            raise ValueError("plugin is required")
 
         if not request.speaker:
-            raise ValueError("speakerを指定してください")
+            raise ValueError("speaker is required")
 
         if not request.text.strip():
-            raise ValueError("textを指定してください")
+            raise ValueError("text is required")
 
         if len(request.text) > settings.limits.max_text_length:
             raise ValueError(
-                f"textは{settings.limits.max_text_length}文字以内で指定してください"
+                f"text must be at most {settings.limits.max_text_length} characters"
             )
 
         plugin = self.plugins.get(request.plugin)
@@ -139,7 +139,7 @@ class SessionProtocol:
         **data: Any,
     ) -> dict[str, Any]:
         if self.playback_task is not None:
-            raise ValueError("別の音声を再生中です")
+            raise ValueError("Another audio playback is already in progress")
 
         self.playback_task = asyncio.create_task(
             self._run_playback(create_operation, event, data)
@@ -157,7 +157,7 @@ class SessionProtocol:
                 await create_operation()
             except Exception as exception:
                 Log.exception(
-                    "音声処理に失敗しました: event=%s data=%s",
+                    "Audio operation failed: event=%s data=%s",
                     event,
                     data,
                 )

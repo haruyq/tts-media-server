@@ -42,19 +42,21 @@ class VoicevoxPlugin:
             try:
                 styles = speaker_styles[speaker]
             except KeyError:
-                raise ValueError(f"話者が存在しません: {speaker}")
+                raise ValueError(f"Speaker not found: {speaker}")
 
             style = options.get("style")
 
             if style is None:
                 style = "ノーマル" if "ノーマル" in styles else next(iter(styles))
             elif not isinstance(style, str):
-                raise ValueError("styleには文字列を指定してください")
+                raise ValueError("style must be a string")
 
             try:
                 speaker_id = styles[style]
             except KeyError:
-                raise ValueError(f"話し方が存在しません: {speaker} / {style}")
+                raise ValueError(
+                    f"Style not found: speaker={speaker}, style={style}"
+                )
 
             async with session.post(
                 f"{VOICEVOX_URL}/audio_query",

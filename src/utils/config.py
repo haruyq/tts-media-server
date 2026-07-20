@@ -16,7 +16,6 @@ class ServerConfig:
 class LimitsConfig:
     max_sessions: int
     max_text_length: int
-    queue_size: int
 
 @dataclass(frozen=True)
 class ApplicationConfig:
@@ -44,10 +43,10 @@ def load_config(
         or not isinstance(server.password, str)
         or not server.password
     ):
-        raise ValueError("server設定が不正です")
+        raise ValueError("Invalid [server] configuration")
 
     if server.password == DEFAULT_PASSWORD:
-        raise ValueError("server.passwordを初期値から変更してください")
+        raise ValueError("server.password must be changed from the default value")
 
     if (
         not isinstance(limits.max_sessions, int)
@@ -56,17 +55,14 @@ def load_config(
         or not isinstance(limits.max_text_length, int)
         or isinstance(limits.max_text_length, bool)
         or limits.max_text_length <= 0
-        or not isinstance(limits.queue_size, int)
-        or isinstance(limits.queue_size, bool)
-        or limits.queue_size <= 0
     ):
-        raise ValueError("limits設定は0より大きい整数にしてください")
+        raise ValueError("All [limits] values must be positive integers")
 
     if not isinstance(plugins, dict) or not all(
         isinstance(name, str) and isinstance(enabled, bool)
         for name, enabled in plugins.items()
     ):
-        raise ValueError("plugins設定は真偽値で指定してください")
+        raise ValueError("All [plugins] values must be booleans")
 
     return ApplicationConfig(server, limits, plugins)
 

@@ -54,7 +54,7 @@ async def session_websocket(websocket: WebSocket, session_id: str):
     await websocket.accept()
 
     if not is_authorized(websocket.headers.get("authorization")):
-        await websocket.close(code=1008, reason="認証に失敗しました")
+        await websocket.close(code=1008, reason="Authentication failed")
         return
 
     send_lock = asyncio.Lock()
@@ -109,10 +109,10 @@ async def session_websocket(websocket: WebSocket, session_id: str):
             except WebSocketDisconnect:
                 raise
             except Exception:
-                Log.exception("WebSocketコマンドの処理に失敗しました")
+                Log.exception("Failed to process WebSocket command")
                 response = _error_response(
                     "internal_error",
-                    "コマンドの処理に失敗しました",
+                    "Failed to process WebSocket command",
                 )
 
             await emit(response)

@@ -25,13 +25,13 @@ class TTSBot(discord.Client):
         speech_timeout: float,
     ) -> None:
         if not password:
-            raise ValueError("server.passwordを設定してください")
+            raise ValueError("server.password must be configured")
 
         if queue_size <= 0:
-            raise ValueError("limits.queue_sizeは0より大きくしてください")
+            raise ValueError("queue_size must be greater than 0")
 
         if speech_timeout <= 0:
-            raise ValueError("TTS_SPEECH_TIMEOUTは0より大きくしてください")
+            raise ValueError("TTS_SPEECH_TIMEOUT must be greater than 0")
 
         intents = discord.Intents.none()
         intents.guilds = True
@@ -78,7 +78,7 @@ class TTSBot(discord.Client):
             try:
                 self.queue.put_nowait(text)
             except asyncio.QueueFull:
-                await message.channel.send("読み上げキューが満杯です")
+                await message.channel.send("The speech queue is full.")
 
     async def on_socket_raw_receive(self, message: str | bytes) -> None:
         try:
@@ -182,7 +182,7 @@ class TTSBot(discord.Client):
                     self.speaking.clear()
 
                 if op in {"error", "speech.failed"}:
-                    print(f"読み上げに失敗しました: {event['data'].get('message')}")
+                    print(f"Speech failed: {event['data'].get('message')}")
 
                 if op in terminal_events:
                     return op
@@ -224,7 +224,7 @@ class TTSBot(discord.Client):
                     self.speech_timeout,
                 )
             except TimeoutError:
-                print("読み上げがタイムアウトしたため停止します")
+                print("Speech timed out; stopping playback.")
                 await websocket.send_json({"op": "playback.stop"})
 
                 try:
@@ -235,7 +235,7 @@ class TTSBot(discord.Client):
                     )
                 except TimeoutError:
                     await websocket.close()
-                    raise RuntimeError("読み上げを停止できませんでした")
+                    raise RuntimeError("Failed to stop speech playback")
 
             self.pending_text = None
             self.queue.task_done()
@@ -264,10 +264,10 @@ class TTSBot(discord.Client):
         ) as websocket:
             ready = await websocket.receive_json()
 
-            print(f"WebSocketイベント: {ready.get('op')}")
+            print(f"WebSocket event: {ready.get('op')}")
 
             if ready.get("op") != "session.ready":
-                raise RuntimeError(f"予期しない応答です: {ready}")
+                raise RuntimeError(f"Unexpected WebSocket response: {ready}")
 
             created = await self.command(
                 websocket,
@@ -276,10 +276,10 @@ class TTSBot(discord.Client):
             )
 
             if created.get("op") != "session.created":
-                raise RuntimeError(f"予期しない応答です: {created}")
+                raise RuntimeError(f"Unexpected WebSocket response: {created}")
 
             self.websocket = websocket
-            print("読み上げを開始しました")
+            print("TTS session is ready")
             events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
             receiver = asyncio.create_task(
                 self.receive_events(websocket, events)
@@ -324,13 +324,13 @@ class TTSBot(discord.Client):
             guild = self.get_guild(self.guild_id)
 
             if guild is None:
-                raise RuntimeError(f"Guildが見つかりません: {self.guild_id}")
+                raise RuntimeError(f"Discord guild not found: {self.guild_id}")
 
             channel = guild.get_channel(self.voice_channel_id)
 
             if not isinstance(channel, (discord.VoiceChannel, discord.StageChannel)):
                 raise RuntimeError(
-                    f"Voice Channelが見つかりません: {self.voice_channel_id}"
+                    f"Discord voice channel not found: {self.voice_channel_id}"
                 )
 
             async with aiohttp.ClientSession() as session:
@@ -341,7 +341,7 @@ class TTSBot(discord.Client):
 
                     try:
                         if not self.voice_ready.is_set():
-                            print(f"Voice Channelへ参加します: {channel}")
+                            print(f"Joining Discord voice channel: {channel}")
                             await guild.change_voice_state(
                                 channel=channel,
                                 self_deaf=True,
@@ -364,7 +364,7 @@ class TTSBot(discord.Client):
                     if asyncio.get_running_loop().time() - started >= 30:
                         delay = 1
 
-                    print(f"APIへ{delay}秒後に再接続します")
+                    print(f"Retrying connection in {delay}s")
                     await asyncio.sleep(delay)
                     delay = min(delay * 2, 30)
         except Exception:
@@ -382,7 +382,7 @@ def required(name: str) -> str:
     value = os.environ.get(name)
 
     if not value:
-        raise RuntimeError(f"環境変数が必要です: {name}")
+        raise RuntimeError(f"Required environment variable is missing: {name}")
 
     return value
 
@@ -404,7 +404,6 @@ def client_url(ip: str, port: int) -> str:
 def main() -> None:
     config = application_config()
     server = config["server"]
-    limits = config["limits"]
     bot = TTSBot(
         int(required("DISCORD_GUILD_ID")),
         int(required("DISCORD_VOICE_CHANNEL_ID")),
@@ -418,7 +417,7 @@ def main() -> None:
         os.environ.get("TTS_SPEAKER", "ずんだもん"),
         os.environ.get("TTS_STYLE"),
         server["password"],
-        limits["queue_size"],
+        100,
         float(os.environ.get("TTS_SPEECH_TIMEOUT", "120")),
     )
     bot.run(required("DISCORD_BOT_TOKEN"))

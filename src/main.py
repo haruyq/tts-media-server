@@ -33,7 +33,7 @@ async def authenticate_api(request: Request, call_next):
     ):
         return JSONResponse(
             status_code=401,
-            content={"detail": "認証に失敗しました"},
+            content={"detail": "Authentication failed"},
             headers={"WWW-Authenticate": "Bearer"},
         )
 

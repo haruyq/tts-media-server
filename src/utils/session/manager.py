@@ -31,7 +31,7 @@ class SessionManager:
         credentials: VoiceCredentials,
     ) -> VoiceSession:
         if self._closed:
-            raise RuntimeError("SessionManagerは終了しています")
+            raise RuntimeError("SessionManager is closed")
 
         if (
             session_id in self._sessions
@@ -113,7 +113,7 @@ class SessionManager:
 
     async def close_all(self) -> None:
         self._closed = True
-        session_ids = (
+        session_ids = tuple(
             set(self._sessions)
             | set(self._creating)
             | set(self._deleting)
@@ -123,8 +123,12 @@ class SessionManager:
             return_exceptions=True,
         )
 
-        for result in results:
+        for session_id, result in zip(session_ids, results):
             if isinstance(result, BaseException):
-                Log.error("セッションの終了に失敗しました", exc_info=result)
+                Log.error(
+                    "Failed to close session: session_id=%s",
+                    session_id,
+                    exc_info=result,
+                )
 
 session_manager = SessionManager()

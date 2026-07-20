@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -42,8 +43,12 @@ class AuthenticationTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["www-authenticate"], "Bearer")
+        self.assertEqual(
+            json.loads(response.body),
+            {"detail": "Authentication failed"},
+        )
         self.assertTrue(websocket.accepted)
-        self.assertEqual(websocket.closed[0], 1008)
+        self.assertEqual(websocket.closed, (1008, "Authentication failed"))
         self.assertTrue(
             is_authorized(f"Bearer {settings.server.password}")
         )

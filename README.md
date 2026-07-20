@@ -35,7 +35,6 @@ password = "change-me-before-exposing"
 [limits]
 max_sessions = 10
 max_text_length = 500
-queue_size = 100
 
 [plugins]
 voicevox = true
@@ -126,8 +125,8 @@ Discord Gatewayから得た接続情報を送信します。
 
 ## 簡易Discord Bot
 
-BotはAPIパスワードとQueue上限を`application.toml`から読みます。Discord情報は
-環境変数に設定します。
+簡易Botは`application.toml`のAPI側IP、port、passwordを参照します。
+Queue上限はBot側で100件です。Discord情報は環境変数に設定します。
 
 ```powershell
 $env:DISCORD_BOT_TOKEN = "..."

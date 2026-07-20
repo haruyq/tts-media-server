@@ -64,7 +64,7 @@ class TTSBotTest(unittest.IsolatedAsyncioTestCase):
         await bot.on_message(message)
 
         self.assertEqual(bot.queue.qsize(), 1)
-        self.assertEqual(notices, ["読み上げキューが満杯です"])
+        self.assertEqual(notices, ["The speech queue is full."])
 
     async def test_reconnects_when_voice_credentials_change(self):
         bot = object.__new__(TTSBot)
@@ -137,7 +137,7 @@ class TTSBotTest(unittest.IsolatedAsyncioTestCase):
                 try:
                     return next(self.responses)
                 except StopIteration:
-                    raise ConnectionError("切断")
+                    raise ConnectionError("Disconnected")
 
             async def send_json(self, message: dict) -> None:
                 self.sent.append(message)
@@ -170,7 +170,7 @@ class TTSBotTest(unittest.IsolatedAsyncioTestCase):
         websocket = WebSocket()
         session = Session(websocket)
 
-        with self.assertRaisesRegex(ConnectionError, "切断"):
+        with self.assertRaisesRegex(ConnectionError, "Disconnected"):
             await asyncio.wait_for(bot.run_websocket(session), 1)
 
         self.assertEqual(
