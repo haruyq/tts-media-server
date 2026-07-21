@@ -177,6 +177,81 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
+
+class SelfContainedEnginePluginTest(unittest.IsolatedAsyncioTestCase):
+    async def test_melotts_proxies_without_shared_engine_client(self):
+        speakers_response = MagicMock()
+        speakers_response.__aenter__ = AsyncMock(return_value=speakers_response)
+        speakers_response.__aexit__ = AsyncMock(return_value=None)
+        speakers_response.json = AsyncMock(return_value={"speakers": ["ZH"]})
+        synthesis_response = MagicMock()
+        synthesis_response.__aenter__ = AsyncMock(return_value=synthesis_response)
+        synthesis_response.__aexit__ = AsyncMock(return_value=None)
+        synthesis_response.read = AsyncMock(return_value=b"engine-wave")
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        session.get.return_value = speakers_response
+        session.post.return_value = synthesis_response
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+        plugin = PluginManager(
+            plugins_dir,
+            {
+                "melotts_zh": {
+                    "enabled": True,
+                    "base_url": "http://melotts-engine:8000/",
+                    "timeout": 30,
+                },
+            },
+        ).get("melotts_zh")
+
+        with patch("aiohttp.ClientSession", return_value=session):
+            speakers = await plugin.speakers()
+            audio = await plugin.synthesize(
+                "你好，世界。",
+                "ZH",
+                {"speed": 1.1},
+            )
+
+        self.assertEqual(speakers, ["ZH"])
+        self.assertEqual(audio, AudioData(b"engine-wave"))
+        session.get.assert_called_once_with("http://melotts-engine:8000/speakers")
+        session.post.assert_called_once_with(
+            "http://melotts-engine:8000/synthesize",
+            json={
+                "text": "你好，世界。",
+                "speaker": "ZH",
+                "options": {"speed": 1.1},
+            },
+        )
+
+    async def test_kokoro_validates_engine_response(self):
+        response = MagicMock()
+        response.__aenter__ = AsyncMock(return_value=response)
+        response.__aexit__ = AsyncMock(return_value=None)
+        response.json = AsyncMock(return_value={"speakers": "not-a-list"})
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        session.get.return_value = response
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+        plugin = PluginManager(
+            plugins_dir,
+            {"kokoro_82m": {"enabled": True}},
+        ).get("kokoro_82m")
+
+        with (
+            patch("aiohttp.ClientSession", return_value=session),
+            self.assertRaisesRegex(RuntimeError, "Invalid speaker response"),
+        ):
+            await plugin.speakers()
+
+    def test_plugins_do_not_import_shared_engine_client(self):
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+        for name in ("melotts_zh.py", "kokoro_82m.py"):
+            source = Path(plugins_dir, name).read_text(encoding="utf-8")
+            self.assertNotIn("engine_client", source)
+
 class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
     async def test_lists_speakers_by_plugin(self):
         plugin = SimpleNamespace(
