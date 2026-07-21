@@ -10,5 +10,5 @@ max_text_length = 500
 
 [plugins]
 voicevox = { enabled = true, base_url = "http://127.0.0.1:50021" }
-melotts_zh = { enabled = false, device = "auto", default_speed = 1.0 }
-kokoro_82m = { enabled = false, language = "a", device = "auto", default_speed = 1.0 }
+melotts_zh = { enabled = false, base_url = "http://127.0.0.1:50100", timeout = 600 }
+kokoro_82m = { enabled = false, base_url = "http://127.0.0.1:50101", timeout = 600 }

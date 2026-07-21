@@ -1,0 +1,38 @@
+services:
+  melotts-zh-engine:
+    build:
+      context: ./engines/melotts_zh
+    environment:
+      MELOTTS_ZH_DEVICE: ${MELOTTS_ZH_DEVICE:-auto}
+    ports:
+      - "127.0.0.1:50100:8000"
+    healthcheck:
+      test: ["CMD", "uv", "run", "--no-sync", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - melotts-zh-cache:/root/.cache
+
+  kokoro-82m-engine:
+    build:
+      context: ./engines/kokoro_82m
+    environment:
+      KOKORO_82M_DEVICE: ${KOKORO_82M_DEVICE:-auto}
+      KOKORO_82M_LANGUAGE: ${KOKORO_82M_LANGUAGE:-a}
+      KOKORO_82M_REPO_ID: ${KOKORO_82M_REPO_ID:-hexgrad/Kokoro-82M}
+    ports:
+      - "127.0.0.1:50101:8000"
+    healthcheck:
+      test: ["CMD", "uv", "run", "--no-sync", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    volumes:
+      - kokoro-82m-cache:/root/.cache
+
+volumes:
+  melotts-zh-cache:
+  kokoro-82m-cache:

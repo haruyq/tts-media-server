@@ -12,13 +12,3 @@ dependencies = [
     "uvicorn>=0.51.0",
     "websockets>=13.0",
 ]
-
-[project.optional-dependencies]
-kokoro-82m = [
-    "kokoro @ git+https://github.com/hexgrad/kokoro.git@dfb907a02bba8152ca444717ca5d78747ccb4bec",
-    "misaki[ja,zh]>=0.9.4",
-    "soundfile>=0.13.1",
-]
-melotts-zh = [
-    "melotts @ git+https://github.com/myshell-ai/MeloTTS.git@209145371cff8fc3bd60d7be902ea69cbdb7965a",
-]

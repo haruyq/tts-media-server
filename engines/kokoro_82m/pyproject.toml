@@ -1,0 +1,15 @@
+[project]
+name = "kokoro-82m-engine"
+version = "0.1.0"
+description = "Isolated Kokoro-82M HTTP engine"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.115,<0.116",
+    "kokoro @ git+https://github.com/hexgrad/kokoro.git@dfb907a02bba8152ca444717ca5d78747ccb4bec",
+    "misaki[ja,zh]>=0.9.4",
+    "soundfile>=0.13.1",
+    "uvicorn[standard]>=0.34,<0.35",
+]
+
+[tool.uv]
+package = false
