@@ -139,6 +139,10 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
             ["「一文。」", "二文！？", "末尾"],
         )
         self.assertEqual(_split_sentences(" \n\t"), [])
+        self.assertEqual(
+            _split_sentences("x" * 250),
+            ["x" * 100, "x" * 100, "x" * 50],
+        )
 
     async def test_lifecycle_and_owned_session_cleanup(self):
         manager = SessionManager()

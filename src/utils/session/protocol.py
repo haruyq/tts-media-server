@@ -18,6 +18,8 @@ credentials_adapter = TypeAdapter(VoiceCredentials)
 speech_adapter = TypeAdapter(SpeechRequest)
 Log = Logger(__name__)
 _sentence_end = re.compile(r"[。！？!?]+[」』）】”’\"')\]}]*")
+# ponytail: shared 100-character cap; make it plugin-specific if engines diverge.
+_max_sentence_length = 100
 
 def _split_sentences(text: str) -> list[str]:
     sentences = []
@@ -38,7 +40,13 @@ def _split_sentences(text: str) -> list[str]:
         if sentence:
             sentences.append(sentence)
 
-    return sentences
+    chunks = []
+
+    for sentence in sentences:
+        for start in range(0, len(sentence), _max_sentence_length):
+            chunks.append(sentence[start:start + _max_sentence_length])
+
+    return chunks
 
 class SessionProtocol:
     def __init__(
