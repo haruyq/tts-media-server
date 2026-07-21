@@ -27,3 +27,6 @@ def test_fp32_matches_fixed_pytorch_model(tmp_path: Path) -> None:
         if not value["passed_fp32_requirement"]
     ]
     assert not failures, json.dumps(failures, ensure_ascii=False, indent=2)
+    cross_check = summary["onnx_cross_check"]
+    assert cross_check is not None
+    assert cross_check["exact"] == cross_check["total"] == 1022

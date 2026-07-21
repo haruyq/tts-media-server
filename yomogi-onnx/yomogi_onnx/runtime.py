@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from bisect import bisect_right
 import json
 import os
 from pathlib import Path
@@ -27,7 +28,10 @@ from .dictionary import (
     ordered_candidates,
 )
 from .normalize import normalize_text
-from .types import YomogiResult, YomogiToken, YomogiUnknownSpan
+from .types import YomogiResult, YomogiSegment, YomogiToken, YomogiUnknownSpan
+
+
+_PredictionPiece = tuple[int, int, int | None]
 
 
 class YomogiOnnx:
@@ -162,17 +166,18 @@ class YomogiOnnx:
         text: str,
         *,
         debug: bool = False,
-    ) -> tuple[list[int], list[int], list[dict[str, Any]]]:
+    ) -> tuple[list[_PredictionPiece], list[int], list[dict[str, Any]]]:
         assert self.candidate_weight is not None
         assert self.candidate_bias is not None
         hidden_states = self._encoder_hidden(text)
-        predicted_ids: list[int] = []
+        pieces: list[_PredictionPiece] = []
         unknown_positions: list[int] = []
         trace: list[dict[str, Any]] = []
         position = 0
         while position < len(text):
             candidate_ids = ordered_candidates(self.dictionary, text, position)
             if not candidate_ids:
+                pieces.append((position, position + 1, None))
                 unknown_positions.append(position)
                 position += 1
                 continue
@@ -183,7 +188,8 @@ class YomogiOnnx:
             logits = weights @ hidden_states[position] + biases
             selected_index = int(np.argmax(logits))
             selected = candidate_ids[selected_index]
-            predicted_ids.append(selected)
+            surface_length = self.dictionary.surface_length(selected)
+            pieces.append((position, position + surface_length, selected))
             if debug:
                 trace.append(
                     {
@@ -193,20 +199,24 @@ class YomogiOnnx:
                         "selected_id": selected,
                     }
                 )
-            position += self.dictionary.surface_length(selected)
-        return predicted_ids, unknown_positions, trace
+            position += surface_length
+        return pieces, unknown_positions, trace
 
     def _predict_full(
         self,
         text: str,
         *,
         debug: bool = False,
-    ) -> tuple[list[int], list[int], list[dict[str, Any]]]:
+    ) -> tuple[list[_PredictionPiece], list[int], list[dict[str, Any]]]:
         input_ids, surface_vocab_ids = self._input_arrays(text)
         candidates = self._candidate_lists(text)
         max_candidates = max((len(value) for value in candidates), default=0)
         if max_candidates == 0:
-            return [], list(range(len(text))), []
+            return (
+                [(position, position + 1, None) for position in range(len(text))],
+                list(range(len(text))),
+                [],
+            )
 
         candidate_ids = np.zeros((len(text), max_candidates), dtype=np.int64)
         candidate_mask = np.zeros((len(text), max_candidates), dtype=np.bool_)
@@ -225,19 +235,21 @@ class YomogiOnnx:
             },
         )[0]
 
-        predicted_ids: list[int] = []
+        pieces: list[_PredictionPiece] = []
         unknown_positions: list[int] = []
         trace: list[dict[str, Any]] = []
         position = 0
         while position < len(text):
             values = candidates[position]
             if not values:
+                pieces.append((position, position + 1, None))
                 unknown_positions.append(position)
                 position += 1
                 continue
             relevant_logits = logits[position, : len(values)]
             selected = values[int(np.argmax(relevant_logits))]
-            predicted_ids.append(selected)
+            surface_length = self.dictionary.surface_length(selected)
+            pieces.append((position, position + surface_length, selected))
             if debug:
                 trace.append(
                     {
@@ -247,8 +259,78 @@ class YomogiOnnx:
                         "selected_id": selected,
                     }
                 )
-            position += self.dictionary.surface_length(selected)
-        return predicted_ids, unknown_positions, trace
+            position += surface_length
+        return pieces, unknown_positions, trace
+
+    @staticmethod
+    def _source_boundaries(
+        input_text: str,
+        normalized_text: str,
+    ) -> tuple[int, ...]:
+        """Map normalized boundaries back to boundaries in the stripped input."""
+        prefix_lengths = [0]
+        prefix = ""
+        for char in input_text:
+            prefix += char
+            prefix_lengths.append(len(normalize_text(prefix)))
+        if prefix_lengths[-1] != len(normalized_text):
+            raise RuntimeError("Unable to align normalized text with input text")
+        return tuple(
+            bisect_right(prefix_lengths, position) - 1
+            for position in range(len(normalized_text) + 1)
+        )
+
+    def _segments(
+        self,
+        input_text: str,
+        normalized_text: str,
+        pieces: list[_PredictionPiece],
+    ) -> tuple[YomogiSegment, ...]:
+        boundaries = self._source_boundaries(input_text, normalized_text)
+        segments: list[YomogiSegment] = []
+        for normalized_start, normalized_end, dict_id in pieces:
+            start = boundaries[normalized_start]
+            end = boundaries[normalized_end]
+            source = input_text[start:end]
+            if dict_id is None:
+                if segments and segments[-1].is_unknown and segments[-1].end == start:
+                    previous = segments[-1]
+                    merged_text = previous.text + source
+                    segments[-1] = YomogiSegment(
+                        start=previous.start,
+                        end=end,
+                        text=merged_text,
+                        read=merged_text,
+                        pron=merged_text,
+                        is_unknown=True,
+                        dict_id=None,
+                    )
+                else:
+                    segments.append(
+                        YomogiSegment(
+                            start=start,
+                            end=end,
+                            text=source,
+                            read=source,
+                            pron=source,
+                            is_unknown=True,
+                            dict_id=None,
+                        )
+                    )
+                continue
+
+            segments.append(
+                YomogiSegment(
+                    start=start,
+                    end=end,
+                    text=source,
+                    read=self.dictionary.read(dict_id),
+                    pron=self.dictionary.pron(dict_id),
+                    is_unknown=False,
+                    dict_id=dict_id,
+                )
+            )
+        return tuple(segments)
 
     @staticmethod
     def _unknown_spans(
@@ -278,7 +360,7 @@ class YomogiOnnx:
         started = time.perf_counter()
         input_text = text.strip()
         if not input_text:
-            result = YomogiResult("", "", "", "", (), 0.0, ())
+            result = YomogiResult("", "", "", "", (), 0.0, (), ())
             return result, []
         if len(input_text) > self.max_length:
             raise ValueError(
@@ -290,16 +372,17 @@ class YomogiOnnx:
             raise ValueError("Normalized input exceeds maximum length")
 
         if self.full_model:
-            predicted_ids, unknown_positions, trace = self._predict_full(
+            pieces, unknown_positions, trace = self._predict_full(
                 normalized,
                 debug=debug,
             )
         else:
-            predicted_ids, unknown_positions, trace = self._predict_encoder(
+            pieces, unknown_positions, trace = self._predict_encoder(
                 normalized,
                 debug=debug,
             )
 
+        predicted_ids = [dict_id for _, _, dict_id in pieces if dict_id is not None]
         tokens = tuple(
             YomogiToken(
                 surface=self.dictionary.surface(dict_id),
@@ -309,15 +392,17 @@ class YomogiOnnx:
             )
             for dict_id in predicted_ids
         )
+        segments = self._segments(input_text, normalized, pieces)
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         result = YomogiResult(
             input_text=input_text,
             normalized_text=normalized,
-            read="".join(token.read for token in tokens),
-            pron="".join(token.pron for token in tokens),
+            read="".join(segment.read for segment in segments),
+            pron="".join(segment.pron for segment in segments),
             tokens=tokens,
             elapsed_ms=elapsed_ms,
             unknown_spans=self._unknown_spans(normalized, unknown_positions),
+            segments=segments,
         )
         return result, trace
 

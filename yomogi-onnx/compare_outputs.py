@@ -27,6 +27,31 @@ def result_signature(result: YomogiResult) -> dict[str, Any]:
     }
 
 
+def model_signature(result: YomogiResult) -> dict[str, Any]:
+    """Fields that must remain identical to the fixed PyTorch model."""
+    signature = result_signature(result)
+    signature.pop("read")
+    signature.pop("pron")
+    return signature
+
+
+def runtime_signature(result: YomogiResult) -> dict[str, Any]:
+    """All deterministic runtime output fields used for A/B comparison."""
+    signature = result_signature(result)
+    signature.update(
+        {
+            "input_text": result.input_text,
+            "pron_hiragana": result.pron_hiragana,
+            "tts_text": result.tts_text,
+            "segments": [
+                {**asdict(segment), "tts_text": segment.tts_text}
+                for segment in result.segments
+            ],
+        }
+    )
+    return signature
+
+
 def load_curated(path: Path) -> list[str]:
     return [
         line.strip()
@@ -91,7 +116,7 @@ def compare_reader(
     reference: TorchYomogiReference,
     cases: Iterable[tuple[str, str]],
     failure_file,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     total = 0
     exact = 0
     dict_id_exact = 0
@@ -99,6 +124,12 @@ def compare_reader(
     pron_exact = 0
     curated_total = 0
     curated_exact = 0
+    model_exact = 0
+    known_only_total = 0
+    known_only_final_exact = 0
+    unknown_total = 0
+    unknown_lossless = 0
+    observations: list[dict[str, Any]] = []
     for category, text in cases:
         total += 1
         if category == "curated":
@@ -107,7 +138,40 @@ def compare_reader(
         actual, actual_trace = reader.debug_trace(text)
         expected_signature = result_signature(expected)
         actual_signature = result_signature(actual)
-        matches = expected_signature == actual_signature
+        expected_model = model_signature(expected)
+        actual_model = model_signature(actual)
+        model_matches = expected_model == actual_model
+        if model_matches:
+            model_exact += 1
+
+        known_only = not expected.unknown_spans
+        final_matches = expected.read == actual.read and expected.pron == actual.pron
+        if known_only:
+            known_only_total += 1
+            if final_matches:
+                known_only_final_exact += 1
+            lossless = True
+        else:
+            unknown_total += 1
+            unknown_segments = [
+                segment for segment in actual.segments if segment.is_unknown
+            ]
+            lossless = (
+                bool(unknown_segments)
+                and len(unknown_segments) == len(actual.unknown_spans)
+                and "".join(segment.text for segment in actual.segments)
+                == actual.input_text
+                and all(
+                    segment.text in actual.read
+                    and segment.text in actual.pron
+                    and segment.text in actual.tts_text
+                    for segment in unknown_segments
+                )
+            )
+            if lossless:
+                unknown_lossless += 1
+
+        matches = model_matches and (final_matches if known_only else lossless)
         if matches:
             exact += 1
             if category == "curated":
@@ -118,6 +182,7 @@ def compare_reader(
             read_exact += 1
         if expected.pron == actual.pron:
             pron_exact += 1
+        observations.append(runtime_signature(actual))
         if not matches:
             failure = {
                 "reader": name,
@@ -132,7 +197,7 @@ def compare_reader(
             }
             failure_file.write(json.dumps(failure, ensure_ascii=False) + "\n")
 
-    return {
+    summary = {
         "reader": name,
         "total": total,
         "exact": exact,
@@ -146,8 +211,24 @@ def compare_reader(
         "curated_total": curated_total,
         "curated_exact": curated_exact,
         "curated_exact_rate": curated_exact / curated_total if curated_total else 1.0,
-        "passed_fp32_requirement": exact == total and curated_exact == curated_total,
+        "model_fields_exact": model_exact,
+        "model_fields_exact_rate": model_exact / total if total else 1.0,
+        "known_only_total": known_only_total,
+        "known_only_final_exact": known_only_final_exact,
+        "known_only_final_exact_rate": (
+            known_only_final_exact / known_only_total if known_only_total else 1.0
+        ),
+        "unknown_total": unknown_total,
+        "unknown_lossless": unknown_lossless,
+        "unknown_lossless_rate": unknown_lossless / unknown_total if unknown_total else 1.0,
+        "passed_fp32_requirement": (
+            model_exact == total
+            and known_only_final_exact == known_only_total
+            and unknown_lossless == unknown_total
+            and curated_exact == curated_total
+        ),
     }
+    return summary, observations
 
 
 def run_comparison(
@@ -195,10 +276,26 @@ def run_comparison(
 
     failure_path.parent.mkdir(parents=True, exist_ok=True)
     with failure_path.open("w", encoding="utf-8") as failure_file:
-        summaries = [
+        comparisons = [
             compare_reader(name, reader, reference, cases, failure_file)
             for name, reader in readers
         ]
+    summaries = [summary for summary, _ in comparisons]
+    observations = [values for _, values in comparisons]
+    if len(observations) >= 2:
+        cross_exact = sum(
+            left == right
+            for left, right in zip(observations[0], observations[1], strict=True)
+        )
+        cross_check = {
+            "left": readers[0][0],
+            "right": readers[1][0],
+            "total": len(cases),
+            "exact": cross_exact,
+            "exact_rate": cross_exact / len(cases) if cases else 1.0,
+        }
+    else:
+        cross_check = None
     if failure_path.stat().st_size == 0:
         failure_path.unlink()
 
@@ -208,6 +305,7 @@ def run_comparison(
         "generated_cases": len(random_cases),
         "seed": 3135,
         "readers": summaries,
+        "onnx_cross_check": cross_check,
     }
 
 

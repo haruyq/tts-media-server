@@ -17,6 +17,26 @@ class YomogiUnknownSpan:
 
 
 @dataclass(frozen=True, slots=True)
+class YomogiSegment:
+    start: int
+    end: int
+    text: str
+    read: str
+    pron: str
+    is_unknown: bool
+    dict_id: int | None
+
+    @property
+    def tts_text(self) -> str:
+        if self.is_unknown:
+            return self.text
+
+        from .kana import katakana_to_hiragana
+
+        return katakana_to_hiragana(self.pron)
+
+
+@dataclass(frozen=True, slots=True)
 class YomogiResult:
     input_text: str
     normalized_text: str
@@ -25,6 +45,7 @@ class YomogiResult:
     tokens: tuple[YomogiToken, ...]
     elapsed_ms: float
     unknown_spans: tuple[YomogiUnknownSpan, ...] = ()
+    segments: tuple[YomogiSegment, ...] = ()
 
     @property
     def read_katakana(self) -> str:

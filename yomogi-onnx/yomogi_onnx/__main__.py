@@ -22,6 +22,10 @@ def main() -> None:
     result = reader.infer(args.text)
     if args.json:
         payload = asdict(result)
+        payload["segments"] = [
+            {**asdict(segment), "tts_text": segment.tts_text}
+            for segment in result.segments
+        ]
         payload.update(
             {
                 "read_katakana": result.read_katakana,
