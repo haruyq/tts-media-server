@@ -23,3 +23,16 @@ the following data sources. Their respective terms continue to apply:
 
 See the linked projects for the complete applicable license texts. This notice
 preserves the attribution list from the fixed upstream Yomogi README.
+
+## VOICEVOX Kanalizer
+
+The hybrid reading frontend depends on VOICEVOX Kanalizer 0.1.1, distributed
+under the MIT License, copyright 2025 VOICEVOX. The upstream license text is
+included verbatim in `KANALIZER_LICENSE`.
+
+The official Kanalizer wheel also contains notices and license texts for its
+Rust dependencies. That complete generated notice is preserved verbatim in
+`KANALIZER_NOTICE.md`.
+
+- Project: https://github.com/VOICEVOX/kanalizer
+- Package: https://pypi.org/project/kanalizer/0.1.1/

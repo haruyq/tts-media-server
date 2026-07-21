@@ -85,6 +85,7 @@ def preprocess_discord(
     *,
     custom_readings: Mapping[str, str] | None = None,
     max_length: int = 500,
+    preserve_unicode_emoji: bool = False,
 ) -> DiscordPreprocessResult:
     """Prepare `discord.Message.clean_content` before Yomogi inference."""
     if max_length <= 0:
@@ -99,14 +100,19 @@ def preprocess_discord(
     removed_emoji_count = 0
     for char in text:
         if char in {"\ufe0f", "\u200d"} or _is_unicode_emoji(char):
-            removed_emoji_count += 1
-            if not filtered or filtered[-1] != " ":
-                filtered.append(" ")
+            if preserve_unicode_emoji:
+                filtered.append(char)
+            else:
+                removed_emoji_count += 1
+                if not filtered or filtered[-1] != " ":
+                    filtered.append(" ")
         else:
             filtered.append(char)
     text = "".join(filtered)
 
-    readings = UserReadings(custom_readings or CUSTOM_READINGS)
+    readings = UserReadings(
+        CUSTOM_READINGS if custom_readings is None else custom_readings
+    )
     text = readings.replace(text)
     text = _REPEATED_SYMBOL.sub(lambda match: match.group(1) * 2, text)
     text = _REPEATED_NEWLINES.sub("\n", text)

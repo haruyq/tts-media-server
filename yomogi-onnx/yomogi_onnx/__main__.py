@@ -2,11 +2,14 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import sys
 
 from .runtime import YomogiOnnx
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="Yomogi v1.4 ONNX inference")
     parser.add_argument("text", help="Japanese text to read")
     parser.add_argument(
