@@ -214,7 +214,7 @@ class SelfContainedEnginePluginTest(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(speakers, ["ZH"])
-        self.assertEqual(audio, AudioData(b"engine-wave"))
+        self.assertEqual(audio.data, b"engine-wave")
         session.get.assert_called_once_with("http://melotts-engine:8000/speakers")
         session.post.assert_called_once_with(
             "http://melotts-engine:8000/synthesize",
@@ -251,6 +251,8 @@ class SelfContainedEnginePluginTest(unittest.IsolatedAsyncioTestCase):
         for name in ("melotts_zh.py", "kokoro_82m.py"):
             source = Path(plugins_dir, name).read_text(encoding="utf-8")
             self.assertNotIn("engine_client", source)
+            self.assertNotIn("from utils", source)
+            self.assertNotIn("import utils", source)
 
 class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
     async def test_lists_speakers_by_plugin(self):

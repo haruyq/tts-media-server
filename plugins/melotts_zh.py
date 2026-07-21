@@ -1,3 +1,4 @@
+from dataclasses import dataclass, field
 import math
 from numbers import Real
 import os
@@ -5,7 +6,10 @@ from typing import Any
 
 import aiohttp
 
-from utils.models import AudioData
+
+@dataclass(frozen=True)
+class AudioData:
+    data: bytes = field(repr=False)
 
 
 class MeloTTSZHPlugin:
