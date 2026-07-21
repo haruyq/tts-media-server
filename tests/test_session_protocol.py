@@ -138,7 +138,15 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
             _split_sentences("「一文。」二文！？\r\n  末尾  "),
             ["「一文。」", "二文！？", "末尾"],
         )
+        self.assertEqual(
+            _split_sentences('First sentence. "Second sentence!"'),
+            ["First sentence.", '"Second sentence!"'],
+        )
         self.assertEqual(_split_sentences(" \n\t"), [])
+        self.assertEqual(
+            _split_sentences("x" * 95 + " short"),
+            ["x" * 95, "short"],
+        )
         self.assertEqual(
             _split_sentences("x" * 250),
             ["x" * 100, "x" * 100, "x" * 50],
