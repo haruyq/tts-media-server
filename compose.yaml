@@ -1,7 +1,7 @@
 services:
   melotts-zh-engine:
     build:
-      context: ./engines/melotts_zh
+      context: https://github.com/hayabusa255/melotts_zh_plugin.git#62fd6a6ece84717564c7db7b7a79d2955f8dd7e5
     environment:
       MELOTTS_ZH_DEVICE: ${MELOTTS_ZH_DEVICE:-auto}
     ports:
@@ -17,7 +17,7 @@ services:
 
   kokoro-82m-engine:
     build:
-      context: ./engines/kokoro_82m
+      context: https://github.com/hayabusa255/kokoro-82m-plugin.git#5ab7d6995f34a0ab7058bea475410c9366d76fdf
     environment:
       KOKORO_82M_DEVICE: ${KOKORO_82M_DEVICE:-auto}
       KOKORO_82M_LANGUAGE: ${KOKORO_82M_LANGUAGE:-a}
