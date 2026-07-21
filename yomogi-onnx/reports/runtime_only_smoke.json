@@ -1,0 +1,25 @@
+{
+  "python": "3.11.14",
+  "direct_dependencies": [
+    "numpy",
+    "onnxruntime"
+  ],
+  "forbidden_packages_absent": [
+    "torch",
+    "onnx",
+    "gradio",
+    "pytest"
+  ],
+  "sync_inference": "passed",
+  "async_inference": "passed",
+  "sample_dict_ids": [
+    2978,
+    2264,
+    2907,
+    2266,
+    10209,
+    2353
+  ],
+  "sample_read": "キョウハニンキノショウヒンデス",
+  "sample_pron_hiragana": "きょーわにんきのしょーひんです"
+}

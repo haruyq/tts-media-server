@@ -1,0 +1,318 @@
+{
+  "conditions": {
+    "device": "CPU",
+    "intra_op_threads": 1,
+    "inter_op_threads": 1,
+    "gc_disabled_during_measurement": true,
+    "process_isolation": true
+  },
+  "warmup": 20,
+  "iterations": 200,
+  "lengths": [
+    10,
+    30,
+    100,
+    300
+  ],
+  "python": "3.11.14 (main, Dec 17 2025, 21:07:57) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "win32",
+  "variants": [
+    {
+      "variant": "pytorch_cpu",
+      "load_seconds": 4.509243200009223,
+      "reported_reader_startup_seconds": 3.36995670000033,
+      "rss_baseline_bytes": 31059968,
+      "rss_loaded_bytes": 858357760,
+      "rss_load_delta_bytes": 827297792,
+      "rss_peak_bytes": 858357760,
+      "artifact_size_bytes": 98236009,
+      "artifact_files": [
+        ".work\\yomogi-v1\\model\\model.pt"
+      ],
+      "measurements": [
+        {
+          "median_ms": 29.67825,
+          "p95_ms": 35.101115,
+          "p99_ms": 37.39211,
+          "characters": 10,
+          "iterations": 200,
+          "chars_per_second": 336.9470908830541,
+          "minimum_ms": 12.1133,
+          "maximum_ms": 65.8679
+        },
+        {
+          "median_ms": 53.215599999999995,
+          "p95_ms": 57.246430000000004,
+          "p99_ms": 60.44675099999995,
+          "characters": 30,
+          "iterations": 200,
+          "chars_per_second": 563.744465908493,
+          "minimum_ms": 29.6365,
+          "maximum_ms": 69.2899
+        },
+        {
+          "median_ms": 157.50245,
+          "p95_ms": 172.57201999999998,
+          "p99_ms": 247.43414999999987,
+          "characters": 100,
+          "iterations": 200,
+          "chars_per_second": 634.9107585310577,
+          "minimum_ms": 104.9783,
+          "maximum_ms": 478.2706
+        },
+        {
+          "median_ms": 408.7047,
+          "p95_ms": 422.1785,
+          "p99_ms": 439.30032599999987,
+          "characters": 300,
+          "iterations": 200,
+          "chars_per_second": 734.0263030985453,
+          "minimum_ms": 221.2044,
+          "maximum_ms": 517.1456
+        }
+      ]
+    },
+    {
+      "variant": "encoder_fp32_memory",
+      "load_seconds": 1.8390931000030832,
+      "reported_reader_startup_seconds": 1.7345984999992652,
+      "rss_baseline_bytes": 31129600,
+      "rss_loaded_bytes": 452063232,
+      "rss_load_delta_bytes": 420933632,
+      "rss_peak_bytes": 457973760,
+      "artifact_size_bytes": 100890617,
+      "artifact_files": [
+        "dist\\dictionary.tsv",
+        "dist\\input_tokens.tsv",
+        "dist\\surface_vocab.tsv",
+        "dist\\model_meta.json",
+        "dist\\yomogi_encoder_fp32.onnx",
+        "dist\\candidate_weight_fp32.npy",
+        "dist\\candidate_bias_fp32.npy"
+      ],
+      "measurements": [
+        {
+          "median_ms": 2.26125,
+          "p95_ms": 2.80909,
+          "p99_ms": 3.109558999999998,
+          "characters": 10,
+          "iterations": 200,
+          "chars_per_second": 4422.332780541736,
+          "minimum_ms": 1.9222,
+          "maximum_ms": 3.4161
+        },
+        {
+          "median_ms": 38.947,
+          "p95_ms": 43.93924,
+          "p99_ms": 45.662296,
+          "characters": 30,
+          "iterations": 200,
+          "chars_per_second": 770.2775566795901,
+          "minimum_ms": 5.0672,
+          "maximum_ms": 62.5097
+        },
+        {
+          "median_ms": 131.0978,
+          "p95_ms": 136.107285,
+          "p99_ms": 137.598682,
+          "characters": 100,
+          "iterations": 200,
+          "chars_per_second": 762.7893069143798,
+          "minimum_ms": 64.0901,
+          "maximum_ms": 146.5423
+        },
+        {
+          "median_ms": 389.61424999999997,
+          "p95_ms": 403.6065249999999,
+          "p99_ms": 518.560205,
+          "characters": 300,
+          "iterations": 200,
+          "chars_per_second": 769.9923706589274,
+          "minimum_ms": 244.4814,
+          "maximum_ms": 774.9122
+        }
+      ]
+    },
+    {
+      "variant": "encoder_fp32_mmap",
+      "load_seconds": 1.8678512000042247,
+      "reported_reader_startup_seconds": 1.7644524999923306,
+      "rss_baseline_bytes": 31023104,
+      "rss_loaded_bytes": 406863872,
+      "rss_load_delta_bytes": 375840768,
+      "rss_peak_bytes": 413323264,
+      "artifact_size_bytes": 100890617,
+      "artifact_files": [
+        "dist\\dictionary.tsv",
+        "dist\\input_tokens.tsv",
+        "dist\\surface_vocab.tsv",
+        "dist\\model_meta.json",
+        "dist\\yomogi_encoder_fp32.onnx",
+        "dist\\candidate_weight_fp32.npy",
+        "dist\\candidate_bias_fp32.npy"
+      ],
+      "measurements": [
+        {
+          "median_ms": 2.255,
+          "p95_ms": 2.7890199999999994,
+          "p99_ms": 2.987319,
+          "characters": 10,
+          "iterations": 200,
+          "chars_per_second": 4434.589800443458,
+          "minimum_ms": 1.9237,
+          "maximum_ms": 3.3364
+        },
+        {
+          "median_ms": 40.0045,
+          "p95_ms": 43.309655,
+          "p99_ms": 44.559767,
+          "characters": 30,
+          "iterations": 200,
+          "chars_per_second": 749.9156344911198,
+          "minimum_ms": 5.0453,
+          "maximum_ms": 47.2544
+        },
+        {
+          "median_ms": 133.66935,
+          "p95_ms": 138.09308499999997,
+          "p99_ms": 140.73902,
+          "characters": 100,
+          "iterations": 200,
+          "chars_per_second": 748.1146575486451,
+          "minimum_ms": 87.6535,
+          "maximum_ms": 147.2635
+        },
+        {
+          "median_ms": 389.2806,
+          "p95_ms": 402.939815,
+          "p99_ms": 406.18189299999995,
+          "characters": 300,
+          "iterations": 200,
+          "chars_per_second": 770.6523263681777,
+          "minimum_ms": 313.1606,
+          "maximum_ms": 413.7219
+        }
+      ]
+    },
+    {
+      "variant": "full_fp32",
+      "load_seconds": 1.9130494999990333,
+      "reported_reader_startup_seconds": 1.8090629000071203,
+      "rss_baseline_bytes": 31162368,
+      "rss_loaded_bytes": 451756032,
+      "rss_load_delta_bytes": 420593664,
+      "rss_peak_bytes": 457809920,
+      "artifact_size_bytes": 100894451,
+      "artifact_files": [
+        "dist\\dictionary.tsv",
+        "dist\\input_tokens.tsv",
+        "dist\\surface_vocab.tsv",
+        "dist\\model_meta.json",
+        "dist\\yomogi_full_fp32.onnx"
+      ],
+      "measurements": [
+        {
+          "median_ms": 2.2402,
+          "p95_ms": 2.9717149999999983,
+          "p99_ms": 5.750149999999997,
+          "characters": 10,
+          "iterations": 200,
+          "chars_per_second": 4463.8871529327735,
+          "minimum_ms": 1.8859,
+          "maximum_ms": 8.5931
+        },
+        {
+          "median_ms": 39.611450000000005,
+          "p95_ms": 43.618894999999995,
+          "p99_ms": 114.547771,
+          "characters": 30,
+          "iterations": 200,
+          "chars_per_second": 757.3567743670073,
+          "minimum_ms": 5.1358,
+          "maximum_ms": 133.2837
+        },
+        {
+          "median_ms": 131.1698,
+          "p95_ms": 135.46438999999998,
+          "p99_ms": 138.965069,
+          "characters": 100,
+          "iterations": 200,
+          "chars_per_second": 762.3706066487865,
+          "minimum_ms": 75.3703,
+          "maximum_ms": 145.0142
+        },
+        {
+          "median_ms": 386.9171,
+          "p95_ms": 399.77092,
+          "p99_ms": 408.44448299999993,
+          "characters": 300,
+          "iterations": 200,
+          "chars_per_second": 775.3598897541618,
+          "minimum_ms": 284.4204,
+          "maximum_ms": 428.1547
+        }
+      ]
+    },
+    {
+      "variant": "encoder_int8_experimental",
+      "load_seconds": 1.856057699988014,
+      "reported_reader_startup_seconds": 1.748448800004553,
+      "rss_baseline_bytes": 31027200,
+      "rss_loaded_bytes": 436391936,
+      "rss_load_delta_bytes": 405364736,
+      "rss_peak_bytes": 442630144,
+      "artifact_size_bytes": 84721953,
+      "artifact_files": [
+        "dist\\dictionary.tsv",
+        "dist\\input_tokens.tsv",
+        "dist\\surface_vocab.tsv",
+        "dist\\model_meta.json",
+        "dist\\experimental\\yomogi_encoder_int8.onnx",
+        "dist\\candidate_weight_fp32.npy",
+        "dist\\candidate_bias_fp32.npy"
+      ],
+      "measurements": [
+        {
+          "median_ms": 0.5697000000000001,
+          "p95_ms": 0.7265649999999998,
+          "p99_ms": 0.8905119999999987,
+          "characters": 10,
+          "iterations": 200,
+          "chars_per_second": 17553.098121818497,
+          "minimum_ms": 0.5232,
+          "maximum_ms": 1.0402
+        },
+        {
+          "median_ms": 1.3867,
+          "p95_ms": 1.6805749999999997,
+          "p99_ms": 1.869577999999999,
+          "characters": 30,
+          "iterations": 200,
+          "chars_per_second": 21634.095334246773,
+          "minimum_ms": 1.2718,
+          "maximum_ms": 2.449
+        },
+        {
+          "median_ms": 6.742050000000001,
+          "p95_ms": 49.551805,
+          "p99_ms": 51.333710999999994,
+          "characters": 100,
+          "iterations": 200,
+          "chars_per_second": 14832.283949243922,
+          "minimum_ms": 4.1248,
+          "maximum_ms": 52.4164
+        },
+        {
+          "median_ms": 140.7851,
+          "p95_ms": 188.54971999999995,
+          "p99_ms": 208.8668169999996,
+          "characters": 300,
+          "iterations": 200,
+          "chars_per_second": 2130.907319027369,
+          "minimum_ms": 46.547,
+          "maximum_ms": 332.6077
+        }
+      ]
+    }
+  ]
+}

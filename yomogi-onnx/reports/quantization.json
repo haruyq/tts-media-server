@@ -1,0 +1,64 @@
+{
+  "input": {
+    "path": "dist/yomogi_encoder_fp32.onnx",
+    "size_bytes": 39331536,
+    "sha256": "89b86c3c48aa491043276fb2b5729a7f7a85e1d4fc5e3f2dff3325226979b1a0"
+  },
+  "output": {
+    "path": "dist/experimental/yomogi_encoder_int8.onnx",
+    "size_bytes": 23162872,
+    "sha256": "a91cf47eb4975cdb266a131977f66d3c9edbc066f7ffc0e70d1127f92ea9257f"
+  },
+  "settings": {
+    "method": "onnxruntime.quantization.quantize_dynamic",
+    "op_types_to_quantize": [
+      "LSTM",
+      "MatMul",
+      "Gemm"
+    ],
+    "weight_type": "QInt8",
+    "per_channel": false,
+    "reduce_range": false
+  },
+  "quantizer_warning": {
+    "message": "ONNX Runtime recommended quantization pre-processing before quantize_dynamic. The emitted model still passed checker, shape inference, and variable-length runtime validation. Accuracy was evaluated separately and did not meet the production threshold.",
+    "disposition": "retained as experimental; not the default runtime"
+  },
+  "elapsed_seconds": 1.028846599991084,
+  "validation": {
+    "checker": "passed",
+    "shape_inference": "passed",
+    "runtime_shapes": [
+      [
+        1,
+        32
+      ],
+      [
+        2,
+        32
+      ],
+      [
+        7,
+        32
+      ],
+      [
+        31,
+        32
+      ],
+      [
+        127,
+        32
+      ]
+    ],
+    "opset": [
+      {
+        "domain": "",
+        "version": 18
+      },
+      {
+        "domain": "com.microsoft",
+        "version": 1
+      }
+    ]
+  }
+}

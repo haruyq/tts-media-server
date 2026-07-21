@@ -1,0 +1,9 @@
+.work/
+.venv/
+.runtime-venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+benchmark_results.local.*
+reports/benchmark_smoke.*
+equivalence_failures.jsonl

@@ -1,0 +1,40 @@
+{
+  "source_revision": "3135d1274edf66099fbced229b0048b08e98dd70",
+  "curated_cases": 22,
+  "generated_cases": 1000,
+  "seed": 3135,
+  "readers": [
+    {
+      "reader": "encoder_fp32",
+      "total": 1022,
+      "exact": 1022,
+      "exact_rate": 1.0,
+      "dict_id_exact": 1022,
+      "dict_id_exact_rate": 1.0,
+      "read_exact": 1022,
+      "read_exact_rate": 1.0,
+      "pron_exact": 1022,
+      "pron_exact_rate": 1.0,
+      "curated_total": 22,
+      "curated_exact": 22,
+      "curated_exact_rate": 1.0,
+      "passed_fp32_requirement": true
+    },
+    {
+      "reader": "full_fp32",
+      "total": 1022,
+      "exact": 1022,
+      "exact_rate": 1.0,
+      "dict_id_exact": 1022,
+      "dict_id_exact_rate": 1.0,
+      "read_exact": 1022,
+      "read_exact_rate": 1.0,
+      "pron_exact": 1022,
+      "pron_exact_rate": 1.0,
+      "curated_total": 22,
+      "curated_exact": 22,
+      "curated_exact_rate": 1.0,
+      "passed_fp32_requirement": true
+    }
+  ]
+}
