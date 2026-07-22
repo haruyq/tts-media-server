@@ -2,8 +2,12 @@ import os
 from typing import Any
 
 import aiohttp
+import time
 
+from utils.logger import Logger
 from utils.models import AudioData
+
+Log = Logger(__name__)
 
 class Kokoro82MPlugin:
     def __init__(self) -> None:
@@ -47,6 +51,8 @@ class Kokoro82MPlugin:
         speaker: str,
         options: dict[str, Any],
     ) -> AudioData:
+        start = time.perf_counter()
+        
         timeout = aiohttp.ClientTimeout(total=300)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -62,6 +68,11 @@ class Kokoro82MPlugin:
                     raise ValueError((await response.json())["detail"])
 
                 response.raise_for_status()
+                
+                end = time.perf_counter()
+                result = (end - start) * 1000
+                Log.debug(f"synthesis completed in {result:.2f} ms - text length: {len(text)}")
+                
                 return AudioData(await response.read())
 
 plugin = Kokoro82MPlugin()
