@@ -215,6 +215,7 @@ class SelfContainedEnginePluginTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(speakers, ["ZH"])
         self.assertEqual(audio.data, b"engine-wave")
+        self.assertFalse(hasattr(plugin, "prepare_text"))
         session.get.assert_called_once_with("http://melotts-engine:8000/speakers")
         session.post.assert_called_once_with(
             "http://melotts-engine:8000/synthesize",
@@ -253,6 +254,71 @@ class SelfContainedEnginePluginTest(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("engine_client", source)
             self.assertNotIn("from utils", source)
             self.assertNotIn("import utils", source)
+
+    async def test_japanese_analysis_routes_by_plugin_and_speaker(self):
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+        voicevox = PluginManager(
+            plugins_dir,
+            {
+                "voicevox": {
+                    "enabled": True,
+                    "base_url": "http://voicevox:50021",
+                    "japanese_analysis": True,
+                }
+            },
+        ).get("voicevox")
+        kokoro = PluginManager(
+            plugins_dir,
+            {
+                "kokoro_82m": {
+                    "enabled": True,
+                    "japanese_analysis": True,
+                }
+            },
+        ).get("kokoro_82m")
+
+        voicevox_text = await voicevox.prepare_text(
+            "今日はMinecraftで遊ぶ",
+            "任意のVOICEVOX話者",
+            {},
+        )
+        english_text = await kokoro.prepare_text(
+            "今日はMinecraftで遊ぶ",
+            "af_heart",
+            {},
+        )
+        japanese_text = await kokoro.prepare_text(
+            "今日はMinecraftで遊ぶ",
+            "jf_alpha",
+            {},
+        )
+
+        self.assertEqual(voicevox_text, "きょーわまいんくらふとであそぶ")
+        self.assertEqual(english_text, "今日はMinecraftで遊ぶ")
+        self.assertEqual(japanese_text, voicevox_text)
+        self.assertIs(voicevox._yomogi_reader, kokoro._yomogi_reader)
+
+    async def test_explicit_japanese_speaker_list_overrides_kokoro_prefix(self):
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+        kokoro = PluginManager(
+            plugins_dir,
+            {
+                "kokoro_82m": {
+                    "enabled": True,
+                    "japanese_analysis": True,
+                    "japanese_speakers": ["custom_ja"],
+                }
+            },
+        ).get("kokoro_82m")
+
+        self.assertEqual(
+            await kokoro.prepare_text("今日は晴れ", "jf_alpha", {}),
+            "今日は晴れ",
+        )
+        self.assertEqual(
+            await kokoro.prepare_text("今日は晴れ", "custom_ja", {}),
+            "きょーわはれ",
+        )
 
 class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
     async def test_lists_speakers_by_plugin(self):

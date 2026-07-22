@@ -77,6 +77,30 @@ class TTSPlugin:
     ) -> AudioData:
         return AudioData(text.encode())
 
+
+class PreparingTTSPlugin(TTSPlugin):
+    def __init__(self) -> None:
+        self.prepared: list[tuple[str, str, dict]] = []
+        self.synthesized: list[str] = []
+
+    async def prepare_text(
+        self,
+        text: str,
+        speaker: str,
+        options: dict,
+    ) -> str:
+        self.prepared.append((text, speaker, options))
+        return "変換後一文。変換後二文。"
+
+    async def synthesize(
+        self,
+        text: str,
+        speaker: str,
+        options: dict,
+    ) -> AudioData:
+        self.synthesized.append(text)
+        return AudioData(text.encode())
+
 class BlockingTTSPlugin:
     def __init__(self) -> None:
         self.started = asyncio.Event()
@@ -142,6 +166,47 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             _split_sentences("x" * 250),
             ["x" * 100, "x" * 100, "x" * 50],
+        )
+
+    async def test_prepares_full_text_once_before_sentence_splitting(self):
+        manager = SessionManager()
+        session = VoiceSession()
+        manager.sessions["test"] = session
+        plugin = PreparingTTSPlugin()
+        plugins = PluginManager()
+        plugins.plugin = plugin
+
+        async def emit(_event: dict) -> None:
+            return None
+
+        protocol = SessionProtocol("test", manager, plugins, emit)
+        protocol.session = session
+        await protocol.handle(
+            WebSocketCommand(
+                "speech.play",
+                {
+                    "plugin": "voicevox",
+                    "speaker": "ずんだもん",
+                    "text": "変換前一文。変換前二文。",
+                    "options": {"style": "ノーマル"},
+                },
+            )
+        )
+        await protocol.playback_task
+
+        self.assertEqual(
+            plugin.prepared,
+            [
+                (
+                    "変換前一文。変換前二文。",
+                    "ずんだもん",
+                    {"style": "ノーマル"},
+                )
+            ],
+        )
+        self.assertEqual(
+            plugin.synthesized,
+            ["変換後一文。", "変換後二文。"],
         )
 
     async def test_lifecycle_and_owned_session_cleanup(self):
