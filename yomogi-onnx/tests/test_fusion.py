@@ -96,6 +96,17 @@ def test_duplicate_word_is_converted_once(
     assert calls == ["minecraft"]
 
 
+def test_tts_text_joins_words_without_whitespace(reader: YomogiOnnx) -> None:
+    result = fusion.convert_hybrid(reader, "Minecraft  Discord")
+
+    assert result.prepared_text == "Minecraft Discord"
+    assert result.tts_text == "まいんくらふとでぃすこーど"
+    assert not any(char.isspace() for char in result.tts_text)
+    assert "".join(segment.original for segment in result.segments) == (
+        result.prepared_text
+    )
+
+
 def test_custom_reading_has_priority_over_kanalizer(
     reader: YomogiOnnx,
     monkeypatch: pytest.MonkeyPatch,

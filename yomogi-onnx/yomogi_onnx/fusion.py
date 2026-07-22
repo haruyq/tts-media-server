@@ -379,7 +379,12 @@ def _result(
     return HybridReadingResult(
         input_text=input_text,
         prepared_text=prepared_text,
-        tts_text="".join(segment.reading for segment in segments),
+        tts_text="".join(
+            char
+            for segment in segments
+            for char in segment.reading
+            if not char.isspace()
+        ),
         segments=segments,
         yomogi_elapsed_ms=yomogi_elapsed_ms,
         kanalizer_elapsed_ms=kanalizer_elapsed_ms,
