@@ -1,0 +1,8 @@
+.agents
+.git
+.venv
+.vscode
+**/__pycache__
+*.py[cod]
+application.toml
+tests

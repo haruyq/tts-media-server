@@ -1,0 +1,8 @@
+services:
+  server:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./application.toml:/app/application.toml:ro
+      - ./plugins:/app/plugins:ro
