@@ -217,6 +217,51 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
             ["変換後一文。", "変換後二文。"],
         )
 
+    async def test_logs_each_speech_pipeline_stage_with_one_trace_id(self):
+        manager = SessionManager()
+        session = VoiceSession()
+        manager.sessions["test"] = session
+        plugin = PreparingTTSPlugin()
+        plugins = PluginManager()
+        plugins.plugin = plugin
+        events: list[dict] = []
+
+        async def emit(event: dict) -> None:
+            events.append(event)
+
+        protocol = SessionProtocol("test", manager, plugins, emit)
+        protocol.session = session
+
+        with self.assertLogs("utils.session.protocol", level="DEBUG") as logs:
+            accepted = await protocol.handle(
+                WebSocketCommand(
+                    "speech.play",
+                    {
+                        "plugin": "voicevox",
+                        "speaker": "ずんだもん",
+                        "text": "変換前一文。変換前二文。",
+                        "options": {},
+                    },
+                )
+            )
+            await protocol.playback_task
+
+        trace_id = accepted["data"]["trace_id"]
+        messages = "\n".join(logs.output)
+        self.assertTrue(trace_id)
+        self.assertEqual(messages.count(f"trace={trace_id} stage=received"), 1)
+        self.assertEqual(messages.count(f"trace={trace_id} stage=prepare.start"), 1)
+        self.assertEqual(messages.count(f"trace={trace_id} stage=prepare.done"), 1)
+        self.assertEqual(messages.count(f"trace={trace_id} stage=split"), 1)
+        self.assertIn("chunk_count=2", messages)
+        self.assertIn("stage=synthesize.start chunk=1/2", messages)
+        self.assertIn("stage=synthesize.start chunk=2/2", messages)
+        self.assertEqual(messages.count(f"trace={trace_id} stage=finished"), 1)
+        self.assertEqual(
+            [event["data"]["trace_id"] for event in events],
+            [trace_id, trace_id],
+        )
+
     async def test_lifecycle_and_owned_session_cleanup(self):
         manager = SessionManager()
         events = []

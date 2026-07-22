@@ -1,5 +1,6 @@
 import asyncio
 import re
+import uuid
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -11,7 +12,7 @@ from pydantic import TypeAdapter
 from utils.config import settings
 from utils.logger import Logger
 from utils.exceptions import SessionAlreadyExists, SessionNotFound
-from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
+from utils.models import AudioData, SpeechRequest, VoiceCredentials, WebSocketCommand
 from utils.plugins import PluginManager, TTSPlugin
 from utils.session.manager import SessionManager
 from utils.session.voice import VoiceSession
@@ -129,12 +130,29 @@ class SessionProtocol:
             )
 
         plugin = self.plugins.get(request.plugin)
+        trace_id = uuid.uuid4().hex[:12]
+        Log.debug(
+            "speech trace=%s stage=received session=%s plugin=%s "
+            "speaker=%s text_length=%d text=%r",
+            trace_id,
+            self.session_id,
+            request.plugin,
+            request.speaker,
+            len(request.text),
+            request.text,
+        )
         return self._start_playback(
-            lambda: self._synthesize_and_play(session, plugin, request),
+            lambda: self._synthesize_and_play(
+                session,
+                plugin,
+                request,
+                trace_id,
+            ),
             "speech",
             initial_event="speech.accepted",
             plugin=request.plugin,
             speaker=request.speaker,
+            trace_id=trace_id,
         )
 
     async def close(self) -> None:
@@ -220,11 +238,17 @@ class SessionProtocol:
         session: VoiceSession,
         plugin: TTSPlugin,
         request: SpeechRequest,
+        trace_id: str,
     ) -> None:
         text = request.text
         prepare_text = getattr(plugin, "prepare_text", None)
 
         if callable(prepare_text):
+            Log.debug(
+                "speech trace=%s stage=prepare.start input_length=%d",
+                trace_id,
+                len(request.text),
+            )
             text = await prepare_text(
                 request.text,
                 request.speaker,
@@ -234,13 +258,62 @@ class SessionProtocol:
                 raise ValueError(
                     "plugin.prepare_text() must return a non-empty string"
                 )
+            Log.debug(
+                "speech trace=%s stage=prepare.done changed=%s "
+                "text_length=%d text=%r",
+                trace_id,
+                text != request.text,
+                len(text),
+                text,
+            )
+        else:
+            Log.debug(
+                "speech trace=%s stage=prepare.skipped text_length=%d text=%r",
+                trace_id,
+                len(text),
+                text,
+            )
 
         sentences = _split_sentences(text)
-        audio = await plugin.synthesize(
-            sentences[0],
-            request.speaker,
-            request.options,
+        chunk_count = len(sentences)
+        Log.debug(
+            "speech trace=%s stage=split chunk_count=%d chunks=%r",
+            trace_id,
+            chunk_count,
+            [
+                {
+                    "index": index,
+                    "length": len(sentence),
+                    "text": sentence,
+                }
+                for index, sentence in enumerate(sentences, start=1)
+            ],
         )
+
+        async def synthesize_chunk(index: int, sentence: str) -> AudioData:
+            Log.debug(
+                "speech trace=%s stage=synthesize.start chunk=%d/%d "
+                "text_length=%d text=%r",
+                trace_id,
+                index,
+                chunk_count,
+                len(sentence),
+                sentence,
+            )
+            audio = await plugin.synthesize(
+                sentence,
+                request.speaker,
+                request.options,
+            )
+            Log.debug(
+                "speech trace=%s stage=synthesize.done chunk=%d/%d",
+                trace_id,
+                index,
+                chunk_count,
+            )
+            return audio
+
+        audio = await synthesize_chunk(1, sentences[0])
 
         async def started() -> None:
             await self.emit(
@@ -248,18 +321,15 @@ class SessionProtocol:
                     "speech.started",
                     plugin=request.plugin,
                     speaker=request.speaker,
+                    trace_id=trace_id,
                 )
             )
 
         on_started = started
 
-        for sentence in sentences[1:]:
+        for index, sentence in enumerate(sentences[1:], start=2):
             synthesis = asyncio.create_task(
-                plugin.synthesize(
-                    sentence,
-                    request.speaker,
-                    request.options,
-                )
+                synthesize_chunk(index, sentence)
             )
 
             try:
@@ -274,6 +344,11 @@ class SessionProtocol:
             on_started = None
 
         await session.play(audio, on_started)
+        Log.debug(
+            "speech trace=%s stage=finished chunk_count=%d",
+            trace_id,
+            chunk_count,
+        )
 
     async def _cancel_playback(self) -> None:
         task = self.playback_task

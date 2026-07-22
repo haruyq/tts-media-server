@@ -28,6 +28,15 @@ kokoro_82m = { enabled = true, japanese_analysis = true, japanese_speakers = ["j
 Yomogi readerは同じモデル設定についてプロセス内で1個だけ生成され、複数pluginで
 共有されます。解析失敗時はログを残して原文をそのままTTSへ渡します。
 
+### 音声処理の追跡ログ
+
+`application.toml`の`server.debug = true`で、各`speech.play`に12桁の`trace_id`を
+付けたDEBUGログを出力します。同じIDについて`received`、`prepare.start`、
+`prepare.done`、`split`、各`synthesize.start`／`done`、`finished`の順に確認できます。
+`received`が既に1語だけなら送信側で分割されており、`received`が全文なのに
+`split`の`chunks`が細かければMedia Server側で分割されています。`trace_id`は
+`speech.accepted`以降のWebSocketイベントにも含まれます。
+
 ## ライセンス
 
 このプロジェクトは[MIT License](./LICENSE)で公開されています。
