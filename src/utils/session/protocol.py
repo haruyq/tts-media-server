@@ -1,14 +1,16 @@
 import asyncio
+import re
+
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-import re
+from textwrap import wrap
 from typing import Any
 
 from pydantic import TypeAdapter
 
 from utils.config import settings
-from utils.exceptions import SessionAlreadyExists, SessionNotFound
 from utils.logger import Logger
+from utils.exceptions import SessionAlreadyExists, SessionNotFound
 from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
 from utils.plugins import PluginManager, TTSPlugin
 from utils.session.manager import SessionManager
@@ -17,8 +19,8 @@ from utils.session.voice import VoiceSession
 credentials_adapter = TypeAdapter(VoiceCredentials)
 speech_adapter = TypeAdapter(SpeechRequest)
 Log = Logger(__name__)
-_sentence_end = re.compile(r"[。！？!?]+[」』）】”’\"')\]}]*")
-# ponytail: shared 100-character cap; make it plugin-specific if engines diverge.
+
+_sentence_end = re.compile(r"[。！？.!?]+[」』）】”’\"')\]}]*")
 _max_sentence_length = 100
 
 def _split_sentences(text: str) -> list[str]:
@@ -43,8 +45,13 @@ def _split_sentences(text: str) -> list[str]:
     chunks = []
 
     for sentence in sentences:
-        for start in range(0, len(sentence), _max_sentence_length):
-            chunks.append(sentence[start:start + _max_sentence_length])
+        chunks.extend(
+            wrap(
+                sentence,
+                width=_max_sentence_length,
+                break_on_hyphens=False,
+            )
+        )
 
     return chunks
 
