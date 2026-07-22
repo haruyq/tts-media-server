@@ -32,12 +32,6 @@ async def create_session(
     await session_manager.create(session_id, credentials)
     return {"session_id": session_id, "status": "created"}
 
-@router.post("/{session_id}/play")
-async def play_audio(session_id: str, path: str) -> dict[str, str]:
-    session = session_manager.get(session_id)
-    await session.play(Path(path))
-    return {"session_id": session_id, "path": path, "status": "played"}
-
 @router.delete("/{session_id}/playback/current")
 async def stop_current(session_id: str) -> dict[str, str]:
     session = session_manager.get(session_id)
