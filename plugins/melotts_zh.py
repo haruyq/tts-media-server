@@ -5,7 +5,7 @@ import aiohttp
 
 from utils.models import AudioData
 
-class Kokoro82MPlugin:
+class MeloTTSZHPlugin:
     def __init__(self) -> None:
         self._base_url = ""
         self.configure({})
@@ -15,21 +15,21 @@ class Kokoro82MPlugin:
 
         if unknown:
             raise ValueError(
-                f"Unknown kokoro_82m config: {', '.join(sorted(unknown))}"
+                f"Unknown melotts_zh config: {', '.join(sorted(unknown))}"
             )
 
         base_url = config.get(
             "base_url",
-            os.environ.get("KOKORO_82M_URL", "http://127.0.0.1:50101"),
+            os.environ.get("MELOTTS_ZH_URL", "http://127.0.0.1:50100"),
         )
 
         if not isinstance(base_url, str):
-            raise ValueError("kokoro_82m.base_url must be a non-empty string")
+            raise ValueError("melotts_zh.base_url must be a non-empty string")
 
         base_url = base_url.strip().rstrip("/")
 
         if not base_url:
-            raise ValueError("kokoro_82m.base_url must be a non-empty string")
+            raise ValueError("melotts_zh.base_url must be a non-empty string")
 
         self._base_url = base_url
 
@@ -64,4 +64,4 @@ class Kokoro82MPlugin:
                 response.raise_for_status()
                 return AudioData(await response.read())
 
-plugin = Kokoro82MPlugin()
+plugin = MeloTTSZHPlugin()

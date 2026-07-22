@@ -10,4 +10,5 @@ max_text_length = 500
 
 [plugins]
 voicevox = { enabled = true, base_url = "http://127.0.0.1:50021" }
-kokoro_82m = { enabled = false, base_url = "http://127.0.0.1:50100" }
+kokoro_82m = { enabled = false, base_url = "http://127.0.0.1:50101" }
+melotts_zh = { enabled = false, base_url = "http://127.0.0.1:50100" }

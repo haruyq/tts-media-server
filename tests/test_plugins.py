@@ -81,6 +81,20 @@ class PluginManagerTest(unittest.TestCase):
                 },
             )
 
+    def test_rejects_unknown_melotts_zh_config(self):
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+
+        with self.assertRaisesRegex(ValueError, "base_ur1"):
+            PluginManager(
+                plugins_dir,
+                {
+                    "melotts_zh": {
+                        "enabled": True,
+                        "base_ur1": "http://melotts:8000",
+                    },
+                },
+            )
+
 class Kokoro82MPluginTest(unittest.IsolatedAsyncioTestCase):
     async def test_synthesizes_audio_and_reports_validation_errors(self):
         speakers_response = MagicMock(status=200)
@@ -154,6 +168,84 @@ class Kokoro82MPluginTest(unittest.IsolatedAsyncioTestCase):
                         "text": "こんにちは",
                         "speaker": "missing",
                         "options": {},
+                    },
+                ),
+            ],
+        )
+
+class MeloTTSZHPluginTest(unittest.IsolatedAsyncioTestCase):
+    async def test_synthesizes_audio_and_reports_validation_errors(self):
+        speakers_response = MagicMock(status=200)
+        speakers_response.__aenter__ = AsyncMock(return_value=speakers_response)
+        speakers_response.__aexit__ = AsyncMock(return_value=None)
+        speakers_response.json = AsyncMock(return_value={"speakers": ["ZH"]})
+        synthesis_response = MagicMock(status=200)
+        synthesis_response.__aenter__ = AsyncMock(
+            return_value=synthesis_response,
+        )
+        synthesis_response.__aexit__ = AsyncMock(return_value=None)
+        synthesis_response.read = AsyncMock(return_value=b"wave")
+        validation_response = MagicMock(status=422)
+        validation_response.__aenter__ = AsyncMock(
+            return_value=validation_response,
+        )
+        validation_response.__aexit__ = AsyncMock(return_value=None)
+        validation_response.json = AsyncMock(
+            return_value={"detail": "Unknown MeloTTS option: pitch"},
+        )
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        session.get.return_value = speakers_response
+        session.post.side_effect = [synthesis_response, validation_response]
+        plugins_dir = Path(__file__).parents[1] / "plugins"
+
+        plugin = PluginManager(
+            plugins_dir,
+            {
+                "melotts_zh": {
+                    "enabled": True,
+                    "base_url": "http://melotts:8000/",
+                },
+            },
+        ).get("melotts_zh")
+        options = {
+            "speed": 1.2,
+            "sdp_ratio": 0.3,
+            "noise_scale": 0.5,
+            "noise_scale_w": 0.7,
+        }
+
+        with patch("aiohttp.ClientSession", return_value=session):
+            speakers = await plugin.speakers()
+            audio = await plugin.synthesize("你好", "ZH", options)
+
+            with self.assertRaisesRegex(ValueError, "Unknown MeloTTS option"):
+                await plugin.synthesize("你好", "ZH", {"pitch": 1.0})
+
+        self.assertEqual(speakers, ["ZH"])
+        self.assertEqual(audio, AudioData(b"wave"))
+        self.assertEqual(
+            session.get.call_args_list,
+            [call("http://melotts:8000/speakers")],
+        )
+        self.assertEqual(
+            session.post.call_args_list,
+            [
+                call(
+                    "http://melotts:8000/synthesize",
+                    json={
+                        "text": "你好",
+                        "speaker": "ZH",
+                        "options": options,
+                    },
+                ),
+                call(
+                    "http://melotts:8000/synthesize",
+                    json={
+                        "text": "你好",
+                        "speaker": "ZH",
+                        "options": {"pitch": 1.0},
                     },
                 ),
             ],
