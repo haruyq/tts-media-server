@@ -123,7 +123,6 @@ class ConfigTest(unittest.TestCase):
             {
                 "enabled": True,
                 "base_url": "http://127.0.0.1:50021",
-                "japanese_analysis": True,
             },
         )
 

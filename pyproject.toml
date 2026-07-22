@@ -3,7 +3,7 @@ name = "tts-media-server"
 version = "0.1.0"
 description = "TTS plugin and Discord voice playback API"
 readme = "README.md"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.14.1,<4",
     "discord-py[voice]>=2.7.1,<2.8",
@@ -11,8 +11,4 @@ dependencies = [
     "psutil>=7.2.2,<8",
     "uvicorn>=0.51.0",
     "websockets>=13.0",
-    "yomogi-onnx",
 ]
-
-[tool.uv.sources]
-yomogi-onnx = { path = "yomogi-onnx" }

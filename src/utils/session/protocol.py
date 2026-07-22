@@ -221,21 +221,7 @@ class SessionProtocol:
         plugin: TTSPlugin,
         request: SpeechRequest,
     ) -> None:
-        text = request.text
-        prepare_text = getattr(plugin, "prepare_text", None)
-
-        if callable(prepare_text):
-            text = await prepare_text(
-                request.text,
-                request.speaker,
-                request.options,
-            )
-            if not isinstance(text, str) or not text.strip():
-                raise ValueError(
-                    "plugin.prepare_text() must return a non-empty string"
-                )
-
-        sentences = _split_sentences(text)
+        sentences = _split_sentences(request.text)
         audio = await plugin.synthesize(
             sentences[0],
             request.speaker,
