@@ -21,7 +21,7 @@ speech_adapter = TypeAdapter(SpeechRequest)
 Log = Logger(__name__)
 
 _sentence_end = re.compile(r"[。！？.!?]+[」』）】”’\"')\]}]*")
-_max_sentence_length = 100
+_max_sentence_length = 200
 
 def _split_sentences(text: str) -> list[str]:
     sentences = []

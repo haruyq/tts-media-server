@@ -29,8 +29,13 @@ class PluginManager:
         configs: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         self._plugins: dict[str, TTSPlugin] = {}
+        sorted_plugins = sorted(plugins_dir.glob("*.py"))
 
-        for path in sorted(plugins_dir.glob("*.py")):
+        Log.info("--------------------------------")
+        Log.info(f"{len(sorted_plugins)} plugin(s) found")
+        Log.info("--------------------------------")
+        
+        for path in sorted_plugins:
             config = None if configs is None else configs.get(path.stem)
 
             if (
@@ -41,6 +46,8 @@ class PluginManager:
                 )
             ):
                 self._load_file(path, config or {})
+        
+        Log.info("--------------------------------")
 
     @property
     def names(self) -> list[str]:
@@ -54,7 +61,7 @@ class PluginManager:
 
     def _load_file(self, path: Path, config: dict[str, Any]) -> None:
         plugin_name = path.stem
-        module_name = f"_tts_media_server_plugin_{plugin_name}"
+        module_name = f"plugin:{plugin_name}"
         spec = spec_from_file_location(module_name, path)
 
         if spec is None or spec.loader is None:
@@ -89,7 +96,7 @@ class PluginManager:
 
             raise
 
-        Log.info(f"Loaded plugin: {plugin_name} ({path})")
+        Log.info(f"Loaded plugin: {plugin_name}")
 
         self._plugins[plugin_name] = plugin
 
