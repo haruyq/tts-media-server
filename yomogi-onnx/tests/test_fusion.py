@@ -96,15 +96,29 @@ def test_duplicate_word_is_converted_once(
     assert calls == ["minecraft"]
 
 
-def test_tts_text_joins_words_without_whitespace(reader: YomogiOnnx) -> None:
+def test_tts_text_preserves_explicit_whitespace(reader: YomogiOnnx) -> None:
     result = fusion.convert_hybrid(reader, "Minecraft  Discord")
 
     assert result.prepared_text == "Minecraft Discord"
-    assert result.tts_text == "まいんくらふとでぃすこーど"
-    assert not any(char.isspace() for char in result.tts_text)
+    assert result.tts_text == "まいんくらふと でぃすこーど"
     assert "".join(segment.original for segment in result.segments) == (
         result.prepared_text
     )
+
+
+def test_japanese_segment_boundaries_do_not_add_whitespace(
+    reader: YomogiOnnx,
+) -> None:
+    joined = fusion.convert_hybrid(reader, "脱北者が")
+    explicit = fusion.convert_hybrid(reader, "脱北者 が")
+
+    assert [segment.reading for segment in joined.segments] == [
+        "だっぽく",
+        "しゃ",
+        "が",
+    ]
+    assert joined.tts_text == "だっぽくしゃが"
+    assert explicit.tts_text == "だっぽくもの が"
 
 
 def test_custom_reading_has_priority_over_kanalizer(

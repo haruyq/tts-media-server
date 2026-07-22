@@ -230,6 +230,15 @@ def _preserve_empty_segment(segment: YomogiSegment) -> bool:
 
 
 def _yomogi_reading_segment(segment: YomogiSegment) -> ReadingSegment:
+    if segment.text and all(char.isspace() for char in segment.text):
+        return ReadingSegment(
+            start=segment.start,
+            end=segment.end,
+            original=segment.text,
+            reading=segment.text,
+            source="yomogi",
+        )
+
     preserve = segment.is_unknown or _preserve_empty_segment(segment)
     return ReadingSegment(
         start=segment.start,
@@ -239,6 +248,14 @@ def _yomogi_reading_segment(segment: YomogiSegment) -> ReadingSegment:
         source="unknown" if preserve else "yomogi",
         is_unknown=preserve,
     )
+
+
+def _tts_segment_text(segment: ReadingSegment) -> str:
+    if segment.is_unknown:
+        return segment.reading
+    if segment.original and all(char.isspace() for char in segment.original):
+        return segment.original
+    return "".join(char for char in segment.reading if not char.isspace())
 
 
 def _compose(
@@ -379,12 +396,7 @@ def _result(
     return HybridReadingResult(
         input_text=input_text,
         prepared_text=prepared_text,
-        tts_text="".join(
-            char
-            for segment in segments
-            for char in segment.reading
-            if not char.isspace()
-        ),
+        tts_text="".join(_tts_segment_text(segment) for segment in segments),
         segments=segments,
         yomogi_elapsed_ms=yomogi_elapsed_ms,
         kanalizer_elapsed_ms=kanalizer_elapsed_ms,
