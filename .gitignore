@@ -3,6 +3,8 @@ __pycache__/
 *.py[oc]
 build/
 dist/
+!yomogi-onnx/dist/
+!yomogi-onnx/dist/**
 wheels/
 *.egg-info
 

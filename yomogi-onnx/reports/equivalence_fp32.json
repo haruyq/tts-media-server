@@ -1,0 +1,63 @@
+{
+  "source_revision": "3135d1274edf66099fbced229b0048b08e98dd70",
+  "curated_cases": 22,
+  "generated_cases": 1000,
+  "seed": 3135,
+  "readers": [
+    {
+      "reader": "encoder_fp32",
+      "total": 1022,
+      "exact": 1022,
+      "exact_rate": 1.0,
+      "dict_id_exact": 1022,
+      "dict_id_exact_rate": 1.0,
+      "read_exact": 1015,
+      "read_exact_rate": 0.9931506849315068,
+      "pron_exact": 1015,
+      "pron_exact_rate": 0.9931506849315068,
+      "curated_total": 22,
+      "curated_exact": 22,
+      "curated_exact_rate": 1.0,
+      "model_fields_exact": 1022,
+      "model_fields_exact_rate": 1.0,
+      "known_only_total": 1015,
+      "known_only_final_exact": 1015,
+      "known_only_final_exact_rate": 1.0,
+      "unknown_total": 7,
+      "unknown_lossless": 7,
+      "unknown_lossless_rate": 1.0,
+      "passed_fp32_requirement": true
+    },
+    {
+      "reader": "full_fp32",
+      "total": 1022,
+      "exact": 1022,
+      "exact_rate": 1.0,
+      "dict_id_exact": 1022,
+      "dict_id_exact_rate": 1.0,
+      "read_exact": 1015,
+      "read_exact_rate": 0.9931506849315068,
+      "pron_exact": 1015,
+      "pron_exact_rate": 0.9931506849315068,
+      "curated_total": 22,
+      "curated_exact": 22,
+      "curated_exact_rate": 1.0,
+      "model_fields_exact": 1022,
+      "model_fields_exact_rate": 1.0,
+      "known_only_total": 1015,
+      "known_only_final_exact": 1015,
+      "known_only_final_exact_rate": 1.0,
+      "unknown_total": 7,
+      "unknown_lossless": 7,
+      "unknown_lossless_rate": 1.0,
+      "passed_fp32_requirement": true
+    }
+  ],
+  "onnx_cross_check": {
+    "left": "encoder_fp32",
+    "right": "full_fp32",
+    "total": 1022,
+    "exact": 1022,
+    "exact_rate": 1.0
+  }
+}
