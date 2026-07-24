@@ -13,6 +13,7 @@ class VoiceCredentials:
 @dataclass(frozen=True)
 class AudioData:
     data: bytes = field(repr=False)
+    media_type: str = "audio/wav"
 
 @dataclass(frozen=True)
 class ServerStatus:
@@ -30,6 +31,21 @@ class SpeechRequest:
     speaker: str
     text: str
     options: dict[str, Any] = field(default_factory=dict)
+
+    def validate(self, max_text_length: int) -> None:
+        if not self.plugin:
+            raise ValueError("plugin is required")
+
+        if not self.speaker:
+            raise ValueError("speaker is required")
+
+        if not self.text.strip():
+            raise ValueError("text is required")
+
+        if len(self.text) > max_text_length:
+            raise ValueError(
+                f"text must be at most {max_text_length} characters"
+            )
 
 @dataclass(frozen=True)
 class WebSocketCommand:

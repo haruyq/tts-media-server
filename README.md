@@ -1,6 +1,6 @@
 # TTS Media Server
 
-Discordのボイスチャンネルへ音声を送信するためのAPIサーバー
+TTS音声ファイルの生成とDiscordのボイスチャンネルへの送信を提供するAPIサーバー
 
 [TTS Client](https://github.com/haruyq/tts-client)から操作できます。
 

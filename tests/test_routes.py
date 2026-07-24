@@ -1,10 +1,12 @@
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from main import app
+from routers.plugins import synthesize_speech
 from routers.status import server_status
-from utils.models import ServerStatus
+from utils.models import AudioData, ServerStatus, SpeechRequest
 
 class RouteTest(unittest.IsolatedAsyncioTestCase):
     def test_registers_http_and_websocket_routes(self):
@@ -14,11 +16,11 @@ class RouteTest(unittest.IsolatedAsyncioTestCase):
                 "/api/plugins",
                 "/api/sessions/",
                 "/api/sessions/{session_id}",
-                "/api/sessions/{session_id}/play",
                 "/api/sessions/{session_id}/playback/current",
                 "/api/speakers",
                 "/api/status",
                 "/api/styles",
+                "/api/synthesize",
             },
         )
         self.assertEqual(
@@ -45,6 +47,63 @@ class RouteTest(unittest.IsolatedAsyncioTestCase):
             openapi["security"],
             [{"BearerAuth": []}],
         )
+        self.assertEqual(
+            openapi["paths"]["/api/synthesize"]["post"][
+                "responses"
+            ]["200"]["content"]["audio/*"]["schema"],
+            {
+                "type": "string",
+                "format": "binary",
+            },
+        )
+
+    async def test_synthesizes_audio_and_reports_validation_errors(self):
+        plugin = SimpleNamespace(
+            synthesize=AsyncMock(
+                return_value=AudioData(b"audio", "audio/mpeg"),
+            ),
+        )
+        manager = SimpleNamespace(get=lambda _: plugin)
+        request = SpeechRequest(
+            "voicevox",
+            "ずんだもん",
+            "こんにちは",
+            {"style": "ノーマル"},
+        )
+
+        with patch("routers.plugins.plugin_manager", manager):
+            response = await synthesize_speech(request)
+
+        self.assertEqual(response.body, b"audio")
+        self.assertEqual(response.headers["content-type"], "audio/mpeg")
+        plugin.synthesize.assert_awaited_once_with(
+            "こんにちは",
+            "ずんだもん",
+            {"style": "ノーマル"},
+        )
+
+        with (
+            patch("routers.plugins.plugin_manager", manager),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await synthesize_speech(
+                SpeechRequest("voicevox", "ずんだもん", " ")
+            )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, "text is required")
+        self.assertEqual(plugin.synthesize.await_count, 1)
+
+        plugin.synthesize.side_effect = ValueError("Style not found")
+
+        with (
+            patch("routers.plugins.plugin_manager", manager),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await synthesize_speech(request)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, "Style not found")
 
     async def test_returns_server_status(self):
         memory = SimpleNamespace(

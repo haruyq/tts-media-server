@@ -113,20 +113,7 @@ class SessionProtocol:
             return self.response("playback.stopped")
 
         request = speech_adapter.validate_python(command.data)
-
-        if not request.plugin:
-            raise ValueError("plugin is required")
-
-        if not request.speaker:
-            raise ValueError("speaker is required")
-
-        if not request.text.strip():
-            raise ValueError("text is required")
-
-        if len(request.text) > settings.limits.max_text_length:
-            raise ValueError(
-                f"text must be at most {settings.limits.max_text_length} characters"
-            )
+        request.validate(settings.limits.max_text_length)
 
         plugin = self.plugins.get(request.plugin)
         return self._start_playback(
