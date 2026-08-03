@@ -6,3 +6,7 @@ services:
     volumes:
       - ./application.toml:/app/application.toml:ro
       - ./plugins:/app/plugins:ro
+      - plugin-runtimes:/home/app/.cache/tts-media-server/runtimes
+
+volumes:
+  plugin-runtimes:

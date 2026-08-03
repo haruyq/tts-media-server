@@ -8,7 +8,7 @@ from utils.exceptions import (
     SessionLimitReached,
     SessionNotFound,
 )
-from utils.models import AudioData, VoiceCredentials
+from utils.models import VoiceCredentials
 from utils.session.manager import SessionManager
 from utils.session.voice import VoiceSession
 
@@ -22,7 +22,7 @@ class VoiceBackend:
     async def connect(self, credentials: VoiceCredentials) -> None:
         pass
 
-    async def play(self, audio: Path | AudioData, started=None) -> None:
+    async def play(self, audio: Path | bytes, started=None) -> None:
         self.started.set()
 
         if started is not None:

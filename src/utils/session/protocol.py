@@ -12,7 +12,7 @@ from utils.config import settings
 from utils.logger import Logger
 from utils.exceptions import SessionAlreadyExists, SessionNotFound
 from utils.models import SpeechRequest, VoiceCredentials, WebSocketCommand
-from utils.plugins import PluginManager, TTSPlugin
+from utils.plugin.manager import PluginManager, TTSPlugin
 from utils.session.manager import SessionManager
 from utils.session.voice import VoiceSession
 

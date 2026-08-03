@@ -4,16 +4,16 @@ from pathlib import Path
 
 from utils.config import settings
 from utils.exceptions import SessionNotFound
-from utils.models import AudioData, VoiceCredentials, WebSocketCommand
+from utils.models import VoiceCredentials, WebSocketCommand
 from utils.session.protocol import SessionProtocol, _split_sentences
 
 class VoiceSession:
     def __init__(self) -> None:
-        self.played: list[Path | AudioData] = []
+        self.played: list[Path | bytes] = []
         self.stopped = False
         self.closed = False
 
-    async def play(self, audio: Path | AudioData, started=None) -> None:
+    async def play(self, audio: Path | bytes, started=None) -> None:
         if started is not None:
             await started()
 
@@ -31,7 +31,7 @@ class PausingVoiceSession(VoiceSession):
         self.first_started = asyncio.Event()
         self.release_first = asyncio.Event()
 
-    async def play(self, audio: Path | AudioData, started=None) -> None:
+    async def play(self, audio: Path | bytes, started=None) -> None:
         if started is not None:
             await started()
 
@@ -74,8 +74,8 @@ class TTSPlugin:
         text: str,
         speaker: str,
         options: dict,
-    ) -> AudioData:
-        return AudioData(text.encode())
+    ) -> bytes:
+        return text.encode()
 
 class BlockingTTSPlugin:
     def __init__(self) -> None:
@@ -86,7 +86,7 @@ class BlockingTTSPlugin:
         text: str,
         speaker: str,
         options: dict,
-    ) -> AudioData:
+    ) -> bytes:
         self.started.set()
         await asyncio.Event().wait()
 
@@ -102,7 +102,7 @@ class PrefetchTTSPlugin:
         text: str,
         speaker: str,
         options: dict,
-    ) -> AudioData:
+    ) -> bytes:
         self.texts.append(text)
 
         if len(self.texts) == 2:
@@ -114,7 +114,7 @@ class PrefetchTTSPlugin:
                 self.second_cancelled.set()
                 raise
 
-        return AudioData(text.encode())
+        return text.encode()
 
 class FailingTTSPlugin:
     async def synthesize(
@@ -122,7 +122,7 @@ class FailingTTSPlugin:
         text: str,
         speaker: str,
         options: dict,
-    ) -> AudioData:
+    ) -> bytes:
         raise RuntimeError("合成失敗")
 
 class PluginManager:
@@ -221,7 +221,7 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cancelled_accepted["op"], "speech.accepted")
         self.assertEqual(
             session.played,
-            [Path("audio.wav"), AudioData("こんにちは".encode())],
+            [Path("audio.wav"), "こんにちは".encode()],
         )
         self.assertEqual(
             [event["op"] for event in events],
@@ -325,7 +325,7 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         await asyncio.wait_for(plugin.second_started.wait(), 1)
 
         self.assertEqual(plugin.texts, ["一文目。", "二文目！"])
-        self.assertEqual(session.played, [AudioData("一文目。".encode())])
+        self.assertEqual(session.played, ["一文目。".encode()])
 
         plugin.second_release.set()
         session.release_first.set()
@@ -339,9 +339,9 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             session.played,
             [
-                AudioData("一文目。".encode()),
-                AudioData("二文目！".encode()),
-                AudioData("三文目".encode()),
+                "一文目。".encode(),
+                "二文目！".encode(),
+                "三文目".encode(),
             ],
         )
         self.assertEqual(

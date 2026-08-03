@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Response
 
 from utils.config import settings
 from utils.models import SpeechRequest
-from utils.plugins import plugin_manager
+from utils.plugin.manager import plugin_manager
 
 router = APIRouter()
 
@@ -58,4 +58,4 @@ async def synthesize_speech(request: SpeechRequest) -> Response:
     except ValueError as exception:
         raise HTTPException(status_code=400, detail=str(exception)) from exception
 
-    return Response(audio.data, media_type=audio.media_type)
+    return Response(audio, media_type="audio/wav")

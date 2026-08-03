@@ -9,7 +9,7 @@ from discord import FFmpegOpusAudio
 from utils.discord.client import ExternalVoiceClient
 from utils.discord.http import VoiceHTTPClient
 from utils.logger import Logger
-from utils.models import AudioData, VoiceCredentials
+from utils.models import VoiceCredentials
 
 Log = Logger(__name__)
 
@@ -44,7 +44,7 @@ class DiscordVoiceBackend:
 
     async def play(
         self,
-        audio: Path | AudioData,
+        audio: Path | bytes,
         started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         voice = self.voice
@@ -96,17 +96,17 @@ class DiscordVoiceBackend:
             while not voice._connection.can_encrypt:
                 await asyncio.sleep(0.05)
 
-    def _create_source(self, audio: Path | AudioData) -> FFmpegOpusAudio:
+    def _create_source(self, audio: Path | bytes) -> FFmpegOpusAudio:
         if isinstance(audio, Path):
             if not audio.is_file():
                 raise FileNotFoundError(f"Audio file not found: {audio}")
 
             return FFmpegOpusAudio(str(audio))
 
-        if not audio.data:
+        if not audio:
             raise ValueError("Audio data must not be empty")
 
-        return FFmpegOpusAudio(io.BytesIO(audio.data), pipe=True)
+        return FFmpegOpusAudio(io.BytesIO(audio), pipe=True)
 
     async def close(self) -> None:
         voice = self.voice

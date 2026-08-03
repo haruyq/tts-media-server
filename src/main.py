@@ -12,14 +12,19 @@ from utils.exceptions import (
     SessionLimitReached,
     SessionNotFound,
 )
+from utils.plugin.manager import plugin_manager
 from utils.session.manager import session_manager
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     try:
+        await plugin_manager.start()
         yield
     finally:
-        await session_manager.close_all()
+        try:
+            await session_manager.close_all()
+        finally:
+            await plugin_manager.close()
 
 app = FastAPI(
     debug=settings.server.debug,

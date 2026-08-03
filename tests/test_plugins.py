@@ -1,365 +1,265 @@
+import asyncio
+import subprocess
+import sys
+import unittest
+
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 from routers.plugins import list_speakers, list_styles
 from utils.exceptions import PluginNotFound
-from utils.models import AudioData
-from utils.plugins import PluginManager
+from utils.plugin.manager import PluginDefinition, PluginManager, PluginProcess
+
+def write_plugin(
+    directory: Path,
+    name: str,
+    source: str,
+    dependencies: list[str] | None = None,
+) -> Path:
+    plugin_dir = directory / name
+    plugin_dir.mkdir()
+    dependencies = dependencies or []
+    dependency_lines = "\n".join(
+        f'    "{dependency}",'
+        for dependency in dependencies
+    )
+    (plugin_dir / "plugin.toml").write_text(
+        "api_version = 1\n"
+        'entrypoint = "plugin.py"\n'
+        "dependencies = [\n"
+        f"{dependency_lines}\n"
+        "]\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "plugin.py").write_text(source, encoding="utf-8")
+    return plugin_dir
 
 class PluginManagerTest(unittest.TestCase):
-    def test_loads_plugin_file(self):
+    def test_discovers_enabled_plugin_directories(self):
         with TemporaryDirectory() as directory:
-            plugin_path = Path(directory, "demo.py")
-            plugin_path.write_text(
-                "class Plugin:\n"
-                "    def configure(self, config):\n"
-                "        self.config = config\n"
-                "\n"
-                "    async def speakers(self):\n"
-                "        return ['speaker']\n"
-                "\n"
-                "    async def synthesize(self, text, speaker, options):\n"
-                "        return text\n"
-                "\n"
-                "plugin = Plugin()\n",
-                encoding="utf-8",
-            )
-
-            manager = PluginManager(
-                Path(directory),
-                {"demo": {"enabled": True, "endpoint": "test"}},
-            )
-            disabled = PluginManager(Path(directory), {})
-
-        self.assertEqual(manager.names, ["demo"])
-        self.assertEqual(disabled.names, [])
-        self.assertEqual(manager.get("demo").config, {"endpoint": "test"})
-        self.assertTrue(callable(manager.get("demo").speakers))
-        self.assertTrue(callable(manager.get("demo").synthesize))
-
-        with self.assertRaises(PluginNotFound):
-            manager.get("missing")
-
-    def test_rejects_invalid_plugin_file(self):
-        with TemporaryDirectory() as directory:
-            Path(directory, "invalid.py").write_text(
+            plugins_dir = Path(directory)
+            plugin_dir = write_plugin(
+                plugins_dir,
+                "demo",
                 "plugin = object()\n",
+                ["./vendor.whl"],
+            )
+            (plugin_dir / "vendor.whl").touch()
+            manager = PluginManager(
+                plugins_dir,
+                {"demo": {"enabled": True, "value": "test"}},
+                {"demo": "python"},
+                plugins_dir / "runtimes",
+            )
+            disabled = PluginManager(
+                plugins_dir,
+                {"demo": {"enabled": False}},
+                {},
+                plugins_dir / "runtimes",
+            )
+
+            self.assertEqual(manager.names, ["demo"])
+            self.assertEqual(disabled.names, [])
+            self.assertEqual(manager.get("demo").config, {"value": "test"})
+            self.assertEqual(
+                manager.get("demo").definition.dependencies,
+                (str((plugin_dir / "vendor.whl").resolve()),),
+            )
+
+            with self.assertRaises(PluginNotFound):
+                manager.get("missing")
+
+    def test_rejects_invalid_plugin_manifest(self):
+        with TemporaryDirectory() as directory:
+            plugins_dir = Path(directory)
+            plugin_dir = write_plugin(
+                plugins_dir,
+                "demo",
+                "plugin = object()\n",
+            )
+            (plugin_dir / "plugin.toml").write_text(
+                "api_version = 1\n"
+                'entrypoint = "../outside.py"\n',
                 encoding="utf-8",
             )
 
-            with self.assertRaisesRegex(TypeError, "invalid.py"):
-                PluginManager(Path(directory))
+            with self.assertRaisesRegex(ValueError, "escapes"):
+                PluginManager(
+                    plugins_dir,
+                    {"demo": {"enabled": True}},
+                    {"demo": "python"},
+                )
 
-    def test_rejects_unknown_voicevox_config(self):
-        plugins_dir = Path(__file__).parents[1] / "plugins"
+    def test_prepares_runtime_only_when_requirements_change(self):
+        with TemporaryDirectory() as directory:
+            runtime_dir = Path(directory)
+            manager = PluginManager(runtime_dir=runtime_dir)
+            commands = []
 
-        with self.assertRaisesRegex(ValueError, "base_ur1"):
-            PluginManager(
+            def run(command, **_):
+                commands.append(command)
+
+                if command[1] == "venv":
+                    python = manager._runtime_python("torch-cu128")
+                    python.parent.mkdir(parents=True)
+                    python.touch()
+
+                return subprocess.CompletedProcess(command, 0)
+
+            with (
+                patch("utils.plugin.manager.shutil.which", return_value="uv"),
+                patch("utils.plugin.manager.subprocess.run", side_effect=run),
+            ):
+                dependencies = ["demo>=1", "torch>=2.8"]
+                manager._prepare_runtime("torch-cu128", dependencies)
+                manager._prepare_runtime("torch-cu128", dependencies)
+
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][1:3], ["venv", "--no-project"])
+        self.assertIn("--exact", commands[1])
+        self.assertIn("--strict", commands[1])
+        self.assertIn("--torch-backend", commands[1])
+        self.assertEqual(
+            commands[1][commands[1].index("--torch-backend") + 1],
+            "cu128",
+        )
+        self.assertEqual(commands[1][-3:], ["--", "demo>=1", "torch>=2.8"])
+
+class PluginManagerAsyncTest(unittest.IsolatedAsyncioTestCase):
+    async def test_resolves_shared_runtime_dependencies_together(self):
+        with TemporaryDirectory() as directory:
+            plugins_dir = Path(directory)
+            write_plugin(
+                plugins_dir,
+                "first",
+                "plugin = object()\n",
+                ["alpha>=1", "torch>=2.8"],
+            )
+            write_plugin(
+                plugins_dir,
+                "second",
+                "plugin = object()\n",
+                ["beta>=1", "torch>=2.8"],
+            )
+            manager = PluginManager(
                 plugins_dir,
                 {
-                    "voicevox": {
-                        "enabled": True,
-                        "base_ur1": "http://voicevox:50021",
-                    },
+                    "first": {"enabled": True},
+                    "second": {"enabled": True},
                 },
-            )
-
-    def test_rejects_unknown_kokoro_82m_config(self):
-        plugins_dir = Path(__file__).parents[1] / "plugins"
-
-        with self.assertRaisesRegex(ValueError, "base_ur1"):
-            PluginManager(
-                plugins_dir,
                 {
-                    "kokoro_82m": {
-                        "enabled": True,
-                        "base_ur1": "http://kokoro:8000",
-                    },
+                    "first": "torch-auto",
+                    "second": "torch-auto",
                 },
+                plugins_dir / "runtimes",
             )
 
-    def test_rejects_unknown_melotts_zh_config(self):
-        plugins_dir = Path(__file__).parents[1] / "plugins"
+            with (
+                patch.object(manager, "_prepare_runtime") as prepare,
+                patch.object(PluginProcess, "start", new=AsyncMock()) as start,
+            ):
+                await manager.start()
 
-        with self.assertRaisesRegex(ValueError, "base_ur1"):
-            PluginManager(
-                plugins_dir,
-                {
-                    "melotts_zh": {
-                        "enabled": True,
-                        "base_ur1": "http://melotts:8000",
-                    },
-                },
+        prepare.assert_called_once_with(
+            "torch-auto",
+            ["alpha>=1", "beta>=1", "torch>=2.8"],
+        )
+        self.assertEqual(start.await_count, 2)
+
+class PluginProcessTest(unittest.IsolatedAsyncioTestCase):
+    async def test_communicates_with_plugin_process(self):
+        source = (
+            "from utils import value\n"
+            "\n"
+            "class Plugin:\n"
+            "    def configure(self, config):\n"
+            "        self.prefix = config['prefix']\n"
+            "\n"
+            "    async def speakers(self):\n"
+            "        return [value]\n"
+            "\n"
+            "    async def styles(self):\n"
+            "        return {'話者': ['通常']}\n"
+            "\n"
+            "    async def synthesize(self, text, speaker, options):\n"
+            "        if speaker == 'missing':\n"
+            "            raise ValueError('Speaker not found')\n"
+            "        data = (self.prefix + text).encode() + b'\\x00\\xff'\n"
+            "        return data\n"
+            "\n"
+            "    async def close(self):\n"
+            "        await __import__('asyncio').Event().wait()\n"
+            "\n"
+            "plugin = Plugin()\n"
+        )
+
+        with TemporaryDirectory(prefix="tts plugin ") as directory:
+            plugin_dir = Path(directory)
+            entrypoint = plugin_dir / "plugin.py"
+            entrypoint.write_text(source, encoding="utf-8")
+            (plugin_dir / "utils").mkdir()
+            (plugin_dir / "utils" / "__init__.py").write_text(
+                "value = 'plugin-local'\n",
+                encoding="utf-8",
+            )
+            process = PluginProcess(
+                PluginDefinition(
+                    "demo",
+                    plugin_dir,
+                    entrypoint,
+                    (),
+                    1,
+                ),
+                Path(sys.executable),
+                {"prefix": "音声:"},
             )
 
-class Kokoro82MPluginTest(unittest.IsolatedAsyncioTestCase):
-    async def test_synthesizes_audio_and_reports_validation_errors(self):
-        speakers_response = MagicMock(status=200)
-        speakers_response.__aenter__ = AsyncMock(return_value=speakers_response)
-        speakers_response.__aexit__ = AsyncMock(return_value=None)
-        speakers_response.json = AsyncMock(
-            return_value={"speakers": ["jf_alpha", "jm_kumo"]},
-        )
-        synthesis_response = MagicMock(status=200)
-        synthesis_response.__aenter__ = AsyncMock(
-            return_value=synthesis_response,
-        )
-        synthesis_response.__aexit__ = AsyncMock(return_value=None)
-        synthesis_response.read = AsyncMock(return_value=b"wave")
-        validation_response = MagicMock(status=422)
-        validation_response.__aenter__ = AsyncMock(
-            return_value=validation_response,
-        )
-        validation_response.__aexit__ = AsyncMock(return_value=None)
-        validation_response.json = AsyncMock(
-            return_value={"detail": "Speaker not found: missing"},
-        )
-        session = MagicMock()
-        session.__aenter__ = AsyncMock(return_value=session)
-        session.__aexit__ = AsyncMock(return_value=None)
-        session.get.return_value = speakers_response
-        session.post.side_effect = [synthesis_response, validation_response]
-        plugins_dir = Path(__file__).parents[1] / "plugins"
+            try:
+                await process.start()
+                speakers, styles = await asyncio.gather(
+                    process.speakers(),
+                    process.styles(),
+                )
+                audio = await process.synthesize("こんにちは", "話者", {})
 
-        plugin = PluginManager(
-            plugins_dir,
-            {
-                "kokoro_82m": {
-                    "enabled": True,
-                    "base_url": "http://kokoro:8000/",
-                },
-            },
-        ).get("kokoro_82m")
+                with self.assertRaisesRegex(ValueError, "Speaker not found"):
+                    await process.synthesize("こんにちは", "missing", {})
+            finally:
+                await asyncio.wait_for(process.close(), 5)
 
-        with patch("aiohttp.ClientSession", return_value=session):
-            speakers = await plugin.speakers()
-            audio = await plugin.synthesize(
-                "こんにちは",
-                "jf_alpha",
-                {"speed": 1.2},
+        self.assertEqual(speakers, ["plugin-local"])
+        self.assertEqual(styles, {"話者": ["通常"]})
+        self.assertEqual(
+            audio,
+            "音声:こんにちは".encode() + b"\x00\xff",
+        )
+
+    async def test_reports_plugin_startup_failure(self):
+        with TemporaryDirectory() as directory:
+            plugin_dir = Path(directory)
+            entrypoint = plugin_dir / "plugin.py"
+            entrypoint.write_text(
+                "raise RuntimeError('startup failed')\n",
+                encoding="utf-8",
             )
-
-            with self.assertRaisesRegex(ValueError, "Speaker not found"):
-                await plugin.synthesize("こんにちは", "missing", {})
-
-        self.assertEqual(speakers, ["jf_alpha", "jm_kumo"])
-        self.assertEqual(audio, AudioData(b"wave"))
-        self.assertEqual(
-            session.get.call_args_list,
-            [call("http://kokoro:8000/speakers")],
-        )
-        self.assertEqual(
-            session.post.call_args_list,
-            [
-                call(
-                    "http://kokoro:8000/synthesize",
-                    json={
-                        "text": "こんにちは",
-                        "speaker": "jf_alpha",
-                        "options": {"speed": 1.2},
-                    },
+            process = PluginProcess(
+                PluginDefinition(
+                    "broken",
+                    plugin_dir,
+                    entrypoint,
+                    (),
+                    1,
                 ),
-                call(
-                    "http://kokoro:8000/synthesize",
-                    json={
-                        "text": "こんにちは",
-                        "speaker": "missing",
-                        "options": {},
-                    },
-                ),
-            ],
-        )
-
-class MeloTTSZHPluginTest(unittest.IsolatedAsyncioTestCase):
-    async def test_synthesizes_audio_and_reports_validation_errors(self):
-        speakers_response = MagicMock(status=200)
-        speakers_response.__aenter__ = AsyncMock(return_value=speakers_response)
-        speakers_response.__aexit__ = AsyncMock(return_value=None)
-        speakers_response.json = AsyncMock(return_value={"speakers": ["ZH"]})
-        synthesis_response = MagicMock(status=200)
-        synthesis_response.__aenter__ = AsyncMock(
-            return_value=synthesis_response,
-        )
-        synthesis_response.__aexit__ = AsyncMock(return_value=None)
-        synthesis_response.read = AsyncMock(return_value=b"wave")
-        validation_response = MagicMock(status=422)
-        validation_response.__aenter__ = AsyncMock(
-            return_value=validation_response,
-        )
-        validation_response.__aexit__ = AsyncMock(return_value=None)
-        validation_response.json = AsyncMock(
-            return_value={"detail": "Unknown MeloTTS option: pitch"},
-        )
-        session = MagicMock()
-        session.__aenter__ = AsyncMock(return_value=session)
-        session.__aexit__ = AsyncMock(return_value=None)
-        session.get.return_value = speakers_response
-        session.post.side_effect = [synthesis_response, validation_response]
-        plugins_dir = Path(__file__).parents[1] / "plugins"
-
-        plugin = PluginManager(
-            plugins_dir,
-            {
-                "melotts_zh": {
-                    "enabled": True,
-                    "base_url": "http://melotts:8000/",
-                },
-            },
-        ).get("melotts_zh")
-        options = {
-            "speed": 1.2,
-            "sdp_ratio": 0.3,
-            "noise_scale": 0.5,
-            "noise_scale_w": 0.7,
-        }
-
-        with patch("aiohttp.ClientSession", return_value=session):
-            speakers = await plugin.speakers()
-            audio = await plugin.synthesize("你好", "ZH", options)
-
-            with self.assertRaisesRegex(ValueError, "Unknown MeloTTS option"):
-                await plugin.synthesize("你好", "ZH", {"pitch": 1.0})
-
-        self.assertEqual(speakers, ["ZH"])
-        self.assertEqual(audio, AudioData(b"wave"))
-        self.assertEqual(
-            session.get.call_args_list,
-            [call("http://melotts:8000/speakers")],
-        )
-        self.assertEqual(
-            session.post.call_args_list,
-            [
-                call(
-                    "http://melotts:8000/synthesize",
-                    json={
-                        "text": "你好",
-                        "speaker": "ZH",
-                        "options": options,
-                    },
-                ),
-                call(
-                    "http://melotts:8000/synthesize",
-                    json={
-                        "text": "你好",
-                        "speaker": "ZH",
-                        "options": {"pitch": 1.0},
-                    },
-                ),
-            ],
-        )
-
-class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
-    async def test_synthesizes_audio(self):
-        audio_query = {"accent_phrases": []}
-        speakers = [
-            {
-                "name": "ずんだもん",
-                "styles": [
-                    {"name": "ノーマル", "id": 3, "type": "talk"},
-                    {"name": "あまあま", "id": 1, "type": "talk"},
-                    {"name": "ソング", "id": 300, "type": "sing"},
-                ],
-            },
-            {
-                "name": "四国めたん",
-                "styles": [
-                    {"name": "あまあま", "id": 0, "type": "talk"},
-                ],
-            },
-        ]
-        speakers_response = MagicMock()
-        speakers_response.__aenter__ = AsyncMock(return_value=speakers_response)
-        speakers_response.__aexit__ = AsyncMock(return_value=None)
-        speakers_response.json = AsyncMock(return_value=speakers)
-        query_response = MagicMock()
-        query_response.__aenter__ = AsyncMock(return_value=query_response)
-        query_response.__aexit__ = AsyncMock(return_value=None)
-        query_response.json = AsyncMock(return_value=audio_query)
-        synthesis_response = MagicMock()
-        synthesis_response.__aenter__ = AsyncMock(return_value=synthesis_response)
-        synthesis_response.__aexit__ = AsyncMock(return_value=None)
-        synthesis_response.read = AsyncMock(return_value=b"wave")
-        session = MagicMock()
-        session.__aenter__ = AsyncMock(return_value=session)
-        session.__aexit__ = AsyncMock(return_value=None)
-        session.get.return_value = speakers_response
-        session.post.side_effect = [
-            query_response,
-            synthesis_response,
-            query_response,
-            synthesis_response,
-        ]
-        plugins_dir = Path(__file__).parents[1] / "plugins"
-
-        plugin = PluginManager(
-            plugins_dir,
-            {
-                "voicevox": {
-                    "enabled": True,
-                    "base_url": "http://voicevox:50021",
-                },
-            },
-        ).get("voicevox")
-
-        with patch("aiohttp.ClientSession", return_value=session):
-            speaker_names = await plugin.speakers()
-            styles = await plugin.styles()
-            audio = await plugin.synthesize(
-                "こんにちは",
-                "ずんだもん",
-                {"style": "あまあま"},
-            )
-            default_audio = await plugin.synthesize(
-                "こんばんは",
-                "ずんだもん",
+                Path(sys.executable),
                 {},
             )
 
-        self.assertEqual(speaker_names, ["ずんだもん", "四国めたん"])
-        self.assertEqual(
-            styles,
-            {
-                "ずんだもん": ["ノーマル", "あまあま"],
-                "四国めたん": ["あまあま"],
-            },
-        )
-        self.assertEqual(audio, AudioData(b"wave"))
-        self.assertEqual(default_audio, AudioData(b"wave"))
-        self.assertEqual(
-            session.get.call_args_list,
-            [
-                call("http://voicevox:50021/speakers"),
-                call("http://voicevox:50021/speakers"),
-                call("http://voicevox:50021/speakers"),
-                call("http://voicevox:50021/speakers"),
-            ],
-        )
-        self.assertEqual(
-            session.post.call_args_list,
-            [
-                call(
-                    "http://voicevox:50021/audio_query",
-                    params={"text": "こんにちは", "speaker": 1},
-                ),
-                call(
-                    "http://voicevox:50021/synthesis",
-                    params={"speaker": 1},
-                    json=audio_query,
-                ),
-                call(
-                    "http://voicevox:50021/audio_query",
-                    params={"text": "こんばんは", "speaker": 3},
-                ),
-                call(
-                    "http://voicevox:50021/synthesis",
-                    params={"speaker": 3},
-                    json=audio_query,
-                ),
-            ],
-        )
+            with self.assertRaisesRegex(RuntimeError, "stopped responding"):
+                await asyncio.wait_for(process.start(), 5)
+
+            await process.close()
 
 class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
     async def test_lists_speakers_by_plugin(self):
@@ -379,20 +279,15 @@ class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
             {"voicevox": ["ずんだもん", "四国めたん"]},
         )
 
-    async def test_lists_optional_styles_by_plugin(self):
-        voicevox = SimpleNamespace(
+    async def test_lists_styles_by_plugin(self):
+        plugin = SimpleNamespace(
             styles=AsyncMock(
                 return_value={"ずんだもん": ["ノーマル", "あまあま"]},
             ),
         )
-        legacy = SimpleNamespace()
-        plugins = {
-            "voicevox": voicevox,
-            "legacy": legacy,
-        }
         manager = SimpleNamespace(
-            names=["voicevox", "legacy"],
-            get=plugins.get,
+            names=["voicevox"],
+            get=lambda _: plugin,
         )
 
         with patch("routers.plugins.plugin_manager", manager):
@@ -400,8 +295,5 @@ class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             response,
-            {
-                "voicevox": {"ずんだもん": ["ノーマル", "あまあま"]},
-                "legacy": {},
-            },
+            {"voicevox": {"ずんだもん": ["ノーマル", "あまあま"]}},
         )

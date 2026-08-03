@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from utils.discord.backend import DiscordVoiceBackend
-from utils.models import AudioData, VoiceCredentials
+from utils.models import VoiceCredentials
 
 class VoiceSession:
     def __init__(self, backend: DiscordVoiceBackend) -> None:
@@ -15,7 +15,7 @@ class VoiceSession:
 
     async def play(
         self,
-        audio: Path | AudioData,
+        audio: Path | bytes,
         started: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         if self.playback is not None:

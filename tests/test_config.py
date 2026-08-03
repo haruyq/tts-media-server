@@ -88,15 +88,30 @@ class AuthenticationTest(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_closes_sessions_on_shutdown(self):
-        with patch(
-            "main.session_manager.close_all",
-            new=AsyncMock(),
-        ) as close_all:
+        events = []
+
+        with (
+            patch(
+                "main.plugin_manager.start",
+                new=AsyncMock(side_effect=lambda: events.append("start")),
+            ) as start,
+            patch(
+                "main.session_manager.close_all",
+                new=AsyncMock(side_effect=lambda: events.append("sessions")),
+            ) as close_all,
+            patch(
+                "main.plugin_manager.close",
+                new=AsyncMock(side_effect=lambda: events.append("plugins")),
+            ) as close_plugins,
+        ):
             with self.assertRaisesRegex(RuntimeError, "shutdown"):
                 async with lifespan(app):
                     raise RuntimeError("shutdown")
 
+        start.assert_awaited_once_with()
         close_all.assert_awaited_once_with()
+        close_plugins.assert_awaited_once_with()
+        self.assertEqual(events, ["start", "sessions", "plugins"])
 
     async def test_returns_too_many_requests_for_session_limit(self):
         response = await handle_api_error(None, SessionLimitReached(1))
@@ -125,6 +140,31 @@ class ConfigTest(unittest.TestCase):
                 "base_url": "http://127.0.0.1:50021",
             },
         )
+        self.assertEqual(
+            config.plugin_runtimes,
+            {
+                "voicevox": "python",
+                "kokoro_82m": "python",
+            },
+        )
+
+    def test_rejects_invalid_plugin_runtime(self):
+        source = Path(__file__).parents[1] / "application.example.toml"
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "application.toml")
+            path.write_text(
+                source.read_text(encoding="utf-8")
+                .replace(
+                    'password = "change-me-before-exposing"',
+                    'password = "test-password"',
+                )
+                .replace('voicevox = "python"', 'voicevox = "../python"'),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "plugins.runtime"):
+                load_config(path)
 
     def test_rejects_empty_password(self):
         source = Path(__file__).parents[1] / "application.example.toml"

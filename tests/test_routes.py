@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from main import app
 from routers.plugins import synthesize_speech
 from routers.status import server_status
-from utils.models import AudioData, ServerStatus, SpeechRequest
+from utils.models import ServerStatus, SpeechRequest
 
 class RouteTest(unittest.IsolatedAsyncioTestCase):
     def test_registers_http_and_websocket_routes(self):
@@ -59,9 +59,7 @@ class RouteTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_synthesizes_audio_and_reports_validation_errors(self):
         plugin = SimpleNamespace(
-            synthesize=AsyncMock(
-                return_value=AudioData(b"audio", "audio/mpeg"),
-            ),
+            synthesize=AsyncMock(return_value=b"audio"),
         )
         manager = SimpleNamespace(get=lambda _: plugin)
         request = SpeechRequest(
@@ -75,7 +73,7 @@ class RouteTest(unittest.IsolatedAsyncioTestCase):
             response = await synthesize_speech(request)
 
         self.assertEqual(response.body, b"audio")
-        self.assertEqual(response.headers["content-type"], "audio/mpeg")
+        self.assertEqual(response.headers["content-type"], "audio/wav")
         plugin.synthesize.assert_awaited_once_with(
             "こんにちは",
             "ずんだもん",

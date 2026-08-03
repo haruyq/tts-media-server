@@ -2,9 +2,13 @@
 
 FROM python:3.11-slim-bookworm
 
+COPY --from=ghcr.io/astral-sh/uv:0.11.17 /uv /bin/uv
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ffmpeg \
     && useradd --system --create-home app \
+    && mkdir -p /home/app/.cache/tts-media-server/runtimes \
+    && chown -R app:app /home/app/.cache \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -16,8 +20,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     UV_PYTHON_DOWNLOADS=0
 
 COPY pyproject.toml uv.lock ./
-RUN --mount=from=ghcr.io/astral-sh/uv:0.11.17,source=/uv,target=/bin/uv \
-    uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project
 
 COPY src ./src
 COPY plugins ./plugins

@@ -14,7 +14,7 @@ from utils.exceptions import (
 )
 from utils.logger import Logger
 from utils.models import VoiceCredentials, WebSocketCommand
-from utils.plugins import plugin_manager
+from utils.plugin.manager import plugin_manager
 from utils.session.manager import session_manager
 from utils.session.protocol import SessionProtocol
 

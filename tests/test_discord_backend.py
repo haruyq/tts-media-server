@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from utils.discord.backend import DiscordVoiceBackend
 from utils.discord.client import ExternalVoiceClient
 from utils.discord.http import VoiceHTTPClient
-from utils.models import AudioData, VoiceCredentials
+from utils.models import VoiceCredentials
 
 class VoiceClient:
     def __init__(self):
@@ -54,7 +54,7 @@ class DiscordVoiceBackendTest(unittest.IsolatedAsyncioTestCase):
             started()
 
         with patch("utils.discord.backend.FFmpegOpusAudio", return_value=source) as ffmpeg:
-            await backend.play(AudioData(b"audio"), on_started)
+            await backend.play(b"audio", on_started)
 
         self.assertIs(voice.source, source)
         started.assert_called_once_with()
@@ -73,7 +73,7 @@ class DiscordVoiceBackendTest(unittest.IsolatedAsyncioTestCase):
 
         with patch("utils.discord.backend.FFmpegOpusAudio", return_value=source):
             with self.assertRaisesRegex(RuntimeError, "再生失敗"):
-                await backend.play(AudioData(b"audio"), started)
+                await backend.play(b"audio", started)
 
         started.assert_not_awaited()
         source.cleanup.assert_called_once_with()

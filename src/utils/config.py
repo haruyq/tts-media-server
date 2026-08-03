@@ -1,10 +1,14 @@
+import json
 import tomllib
+
 from dataclasses import dataclass
 from pathlib import Path
+from re import fullmatch
 from secrets import compare_digest
 from typing import Any
 
 DEFAULT_PASSWORD = "change-me-before-exposing"
+RUNTIME_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 
 @dataclass(frozen=True)
 class ServerConfig:
@@ -23,6 +27,7 @@ class ApplicationConfig:
     server: ServerConfig
     limits: LimitsConfig
     plugins: dict[str, dict[str, Any]]
+    plugin_runtimes: dict[str, str]
 
 def load_config(
     path: Path = Path(__file__).parents[2] / "application.toml",
@@ -62,6 +67,18 @@ def load_config(
     if not isinstance(plugin_values, dict):
         raise ValueError("[plugins] must be a table")
 
+    plugin_values = dict(plugin_values)
+    runtime_values = plugin_values.pop("runtime", {})
+
+    if not isinstance(runtime_values, dict) or not all(
+        isinstance(name, str)
+        and name
+        and isinstance(runtime, str)
+        and fullmatch(RUNTIME_NAME, runtime) is not None
+        for name, runtime in runtime_values.items()
+    ):
+        raise ValueError("[plugins.runtime] must map plugin names to runtimes")
+
     plugins: dict[str, dict[str, Any]] = {}
 
     for name, plugin_config in plugin_values.items():
@@ -70,7 +87,7 @@ def load_config(
 
         if (
             not isinstance(name, str)
-            or not name
+            or fullmatch(RUNTIME_NAME, name) is None
             or not isinstance(plugin_config, dict)
             or not isinstance(plugin_config.get("enabled"), bool)
         ):
@@ -80,7 +97,41 @@ def load_config(
 
         plugins[name] = dict(plugin_config)
 
-    return ApplicationConfig(server, limits, plugins)
+        try:
+            json.dumps(
+                {
+                    key: value
+                    for key, value in plugin_config.items()
+                    if key != "enabled"
+                },
+                allow_nan=False,
+            )
+        except (TypeError, ValueError) as exception:
+            raise ValueError(
+                f"Plugin config must be JSON-compatible: {name}"
+            ) from exception
+
+    unknown_runtimes = set(runtime_values) - set(plugins)
+
+    if unknown_runtimes:
+        raise ValueError(
+            "Runtime configured for unknown plugin: "
+            f"{', '.join(sorted(unknown_runtimes))}"
+        )
+
+    missing_runtimes = {
+        name
+        for name, plugin_config in plugins.items()
+        if plugin_config["enabled"] and name not in runtime_values
+    }
+
+    if missing_runtimes:
+        raise ValueError(
+            "Runtime not configured for enabled plugin: "
+            f"{', '.join(sorted(missing_runtimes))}"
+        )
+
+    return ApplicationConfig(server, limits, plugins, dict(runtime_values))
 
 settings = load_config()
 

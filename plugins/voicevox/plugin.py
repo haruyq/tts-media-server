@@ -1,13 +1,12 @@
+import logging
 import os
+import time
+
 from typing import Any
 
 import aiohttp
-import time
 
-from utils.models import AudioData
-from utils.logger import Logger
-
-Log = Logger(__name__)
+Log = logging.getLogger(__name__)
 
 class VoicevoxPlugin:
     def __init__(self) -> None:
@@ -59,9 +58,8 @@ class VoicevoxPlugin:
         text: str,
         speaker: str,
         options: dict[str, Any],
-    ) -> AudioData:
+    ) -> bytes:
         start = time.perf_counter()
-        
         timeout = aiohttp.ClientTimeout(total=30)
 
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -99,12 +97,12 @@ class VoicevoxPlugin:
                 json=audio_query,
             ) as response:
                 response.raise_for_status()
-                
-                end = time.perf_counter()
-                result = (end - start) * 1000
-                Log.debug(f"synthesis completed in {result:.2f} ms - text length: {len(text)}")
-                
-                return AudioData(await response.read())
+                elapsed = (time.perf_counter() - start) * 1000
+                Log.debug(
+                    f"synthesis completed in {elapsed:.2f} ms - "
+                    f"text length: {len(text)}"
+                )
+                return await response.read()
 
     async def _speaker_styles(
         self,

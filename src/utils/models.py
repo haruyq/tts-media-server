@@ -11,11 +11,6 @@ class VoiceCredentials:
     token: str
 
 @dataclass(frozen=True)
-class AudioData:
-    data: bytes = field(repr=False)
-    media_type: str = "audio/wav"
-
-@dataclass(frozen=True)
 class ServerStatus:
     session_count: int
     max_sessions: int
