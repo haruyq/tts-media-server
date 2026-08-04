@@ -4,5 +4,7 @@
 .vscode
 **/__pycache__
 *.py[cod]
+plugins/piper_tts/models/*.onnx
+plugins/piper_tts/models/*.onnx.json
 application.toml
 tests
