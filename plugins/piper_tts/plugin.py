@@ -26,12 +26,7 @@ MIN_PHONEME_BODY = 3
 DEFAULT_OPTIONS = {
     "noise_scale": 0.667,
     "noise_scale_w": 0.5,
-    "length_scale": 1.7,
-}
-OPTION_RANGES = {
-    "noise_scale": (0.0, 2.0),
-    "noise_scale_w": (0.0, 2.0),
-    "length_scale": (0.1, 5.0),
+    "length_scale": 1.55,
 }
 
 @dataclass(frozen=True)
@@ -305,7 +300,7 @@ class PiperTTSPlugin:
         options: dict[str, Any],
         model: LoadedModel,
     ) -> tuple[dict[str, float], str]:
-        unknown = set(options) - set(OPTION_RANGES) - {"language", "style"}
+        unknown = set(options) - set(DEFAULT_OPTIONS) - {"language", "style"}
 
         if unknown:
             raise ValueError(
@@ -326,18 +321,21 @@ class PiperTTSPlugin:
 
         result: dict[str, float] = {}
 
-        for name, (minimum, maximum) in OPTION_RANGES.items():
-            value = options.get(name, DEFAULT_OPTIONS[name])
+        for name, default in DEFAULT_OPTIONS.items():
+            value = options.get(name, default)
 
             if (
                 isinstance(value, bool)
                 or not isinstance(value, (int, float))
                 or not math.isfinite(value)
-                or not minimum <= value <= maximum
             ):
-                raise ValueError(
-                    f"{name} must be a number between {minimum} and {maximum}"
-                )
+                raise ValueError(f"{name} must be a finite number")
+
+            if name == "length_scale" and value <= 0:
+                raise ValueError("length_scale must be greater than 0")
+
+            if name != "length_scale" and value < 0:
+                raise ValueError(f"{name} must be 0 or greater")
 
             result[name] = float(value)
 
