@@ -5,6 +5,7 @@ import io
 import json
 import logging
 import math
+import os
 import time
 import unicodedata
 import wave
@@ -22,6 +23,7 @@ from piper_plus_g2p.encode.encoder import PiperEncoder
 Log = logging.getLogger(__name__)
 
 MODELS_DIR = Path(__file__).with_name("models")
+NLTK_DATA_DIR = Path(__file__).with_name("nltk_data")
 MIN_PHONEME_IDS = 15
 MIN_PHONEME_BODY = 3
 DEFAULT_OPTIONS = {
@@ -29,6 +31,10 @@ DEFAULT_OPTIONS = {
     "noise_scale_w": 0.5,
     "length_scale": 1.55,
 }
+CHINESE_DIGITS = str.maketrans(
+    "0123456789０１２３４５６７８９",
+    "零一二三四五六七八九零一二三四五六七八九",
+)
 
 @dataclass(frozen=True)
 class LoadedModel:
@@ -51,6 +57,8 @@ class PiperTTSPlugin:
             raise ValueError(
                 f"Unknown piper_tts config: {', '.join(sorted(unknown))}"
             )
+
+        os.environ["NLTK_DATA"] = str(NLTK_DATA_DIR)
 
         model_paths = sorted(
             path
@@ -215,6 +223,11 @@ class PiperTTSPlugin:
         language: str,
     ) -> bytes:
         phonemizer = get_phonemizer(language)
+
+        if language == "zh":
+            # ponytail: read Chinese numbers digit-by-digit; add cardinal
+            # normalization if context-sensitive number reading is needed.
+            text = text.translate(CHINESE_DIGITS)
 
         start = time.perf_counter()
         phonemes, prosody = phonemizer.phonemize_with_prosody(text)

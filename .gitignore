@@ -14,3 +14,4 @@ application.toml
 
 *.onnx
 *.onnx.json
+plugins/piper_tts/nltk_data/
