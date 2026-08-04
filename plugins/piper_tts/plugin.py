@@ -180,6 +180,12 @@ class PiperTTSPlugin:
     async def speakers(self) -> list[str]:
         return list(self._models)
 
+    async def styles(self) -> dict[str, list[str]]:
+        return {
+            speaker: list(model.language_id_map)
+            for speaker, model in self._models.items()
+        }
+
     async def synthesize(
         self,
         text: str,
@@ -299,14 +305,21 @@ class PiperTTSPlugin:
         options: dict[str, Any],
         model: LoadedModel,
     ) -> tuple[dict[str, float], str]:
-        unknown = set(options) - set(OPTION_RANGES) - {"language"}
+        unknown = set(options) - set(OPTION_RANGES) - {"language", "style"}
 
         if unknown:
             raise ValueError(
                 f"Unknown piper_tts option: {', '.join(sorted(unknown))}"
             )
 
-        language = options.get("language", "ja")
+        language = options.get("language", options.get("style", "ja"))
+
+        if (
+            "language" in options
+            and "style" in options
+            and options["language"] != options["style"]
+        ):
+            raise ValueError("language and style must match")
 
         if not isinstance(language, str) or language not in model.language_id_map:
             raise ValueError(f"Unsupported language: {language}")
