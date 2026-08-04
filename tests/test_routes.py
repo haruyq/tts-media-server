@@ -3,12 +3,22 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
-from main import app
+from main import app, swagger_ui
 from routers.plugins import synthesize_speech
 from routers.status import server_status
 from utils.models import ServerStatus, SpeechRequest
 
 class RouteTest(unittest.IsolatedAsyncioTestCase):
+    async def test_swagger_ui_plays_synthesized_audio_from_response(self):
+        request = SimpleNamespace(scope={"root_path": "/tts"})
+
+        response = await swagger_ui(request)
+        html = response.body.decode("utf-8")
+
+        self.assertIn("url: '/tts/openapi.json'", html)
+        self.assertIn("plugins: [AudioResponsePlugin]", html)
+        self.assertIn("URL.createObjectURL", html)
+
     def test_registers_http_and_websocket_routes(self):
         self.assertEqual(
             set(app.openapi()["paths"]),

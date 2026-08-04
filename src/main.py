@@ -1,7 +1,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse, JSONResponse
 from routers.plugins import router as plugins_router
 from routers.sessions import router as sessions_router
 from routers.status import router as status_router
@@ -14,6 +15,33 @@ from utils.exceptions import (
 )
 from utils.plugin.manager import plugin_manager
 from utils.session.manager import session_manager
+
+SWAGGER_UI_AUDIO_PLUGIN = r"""
+    const AudioResponsePlugin = system => ({
+        wrapComponents: {
+            responseBody: Original => {
+                const AudioResponse = props => {
+                    const audioUrl = system.React.useMemo(
+                        () => URL.createObjectURL(props.content),
+                        [props.content]
+                    )
+                    system.React.useEffect(
+                        () => () => URL.revokeObjectURL(audioUrl),
+                        [audioUrl]
+                    )
+                    return system.React.createElement(
+                        Original,
+                        { ...props, url: audioUrl }
+                    )
+                }
+                return props =>
+                    /^audio\//i.test(props.contentType)
+                        ? system.React.createElement(AudioResponse, props)
+                        : system.React.createElement(Original, props)
+            },
+        },
+    })
+"""
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -28,8 +56,26 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     debug=settings.server.debug,
+    docs_url=None,
     lifespan=lifespan,
 )
+
+@app.get("/docs", include_in_schema=False)
+async def swagger_ui(request: Request) -> HTMLResponse:
+    root_path = request.scope.get("root_path", "").rstrip("/")
+    response = get_swagger_ui_html(
+        openapi_url=root_path + app.openapi_url,
+        title=f"{app.title} - Swagger UI",
+    )
+    marker = "    const ui = SwaggerUIBundle({"
+    html = response.body.decode("utf-8").replace(
+        marker,
+        SWAGGER_UI_AUDIO_PLUGIN
+        + marker
+        + "\n        plugins: [AudioResponsePlugin],",
+        1,
+    )
+    return HTMLResponse(html)
 
 @app.middleware("http")
 async def authenticate_api(request: Request, call_next):
