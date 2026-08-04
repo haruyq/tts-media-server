@@ -24,9 +24,9 @@ MODELS_DIR = Path(__file__).with_name("models")
 MIN_PHONEME_IDS = 15
 MIN_PHONEME_BODY = 3
 DEFAULT_OPTIONS = {
-    "noise_scale": 0.4,
-    "noise_scale_w": 0.3,
-    "length_scale": 1.5,
+    "noise_scale": 0.667,
+    "noise_scale_w": 0.5,
+    "length_scale": 1.7,
 }
 OPTION_RANGES = {
     "noise_scale": (0.0, 2.0),
