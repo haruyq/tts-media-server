@@ -11,3 +11,5 @@ wheels/
 
 # Local application settings
 application.toml
+
+piper_tts/
