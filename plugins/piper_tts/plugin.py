@@ -6,6 +6,7 @@ import json
 import logging
 import math
 import time
+import unicodedata
 import wave
 
 from dataclasses import dataclass
@@ -33,6 +34,7 @@ DEFAULT_OPTIONS = {
 class LoadedModel:
     session: onnxruntime.InferenceSession
     encoder: PiperEncoder
+    phoneme_symbols: frozenset[str]
     language_id_map: dict[str, int]
     sample_rate: int
     hop_size: int
@@ -166,6 +168,7 @@ class PiperTTSPlugin:
         return LoadedModel(
             session,
             PiperEncoder(phoneme_id_map, strict=True),
+            frozenset(phoneme_id_map),
             dict(language_id_map),
             sample_rate,
             hop_size,
@@ -215,14 +218,30 @@ class PiperTTSPlugin:
 
         start = time.perf_counter()
         phonemes, prosody = phonemizer.phonemize_with_prosody(text)
+        phonemes_and_prosody = [
+            (phoneme, value)
+            for phoneme, value in zip(phonemes, prosody, strict=True)
+            if phoneme in model.phoneme_symbols
+            or any(
+                not character.isspace()
+                and not unicodedata.category(character).startswith("P")
+                for character in phoneme
+            )
+        ]
 
-        if not phonemes:
+        if not phonemes_and_prosody:
             raise ValueError("text does not contain readable characters")
 
-        phoneme_ids, prosody = model.encoder.encode_with_prosody(
-            phonemes,
-            prosody,
-        )
+        phonemes = [phoneme for phoneme, _ in phonemes_and_prosody]
+        prosody = [value for _, value in phonemes_and_prosody]
+
+        try:
+            phoneme_ids, prosody = model.encoder.encode_with_prosody(
+                phonemes,
+                prosody,
+            )
+        except KeyError as exception:
+            raise ValueError(str(exception)) from exception
 
         original_length = len(phoneme_ids)
         noise_scale = options["noise_scale"]
