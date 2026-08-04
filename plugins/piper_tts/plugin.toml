@@ -1,0 +1,7 @@
+api_version = 1
+entrypoint = "plugin.py"
+dependencies = [
+    "numpy>=1.26.4,<2.5",
+    "onnxruntime>=1.26.0,<2",
+    "piper-plus-g2p[ja,en,zh] @ git+https://github.com/ayutaz/piper-plus.git@6268d21ed6dd2f1cd50ec638be7ae720a1f5af3c#subdirectory=src/python/g2p",
+]
