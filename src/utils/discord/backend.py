@@ -32,6 +32,10 @@ class DiscordVoiceBackend:
 
         try:
             await voice.connect(reconnect=True, timeout=30.0)
+
+            if not voice.is_connected():
+                raise RuntimeError("Not connected to Discord Voice")
+
             await self._wait_for_dave()
         except Exception:
             await self.close()
@@ -124,10 +128,13 @@ class DiscordVoiceBackend:
                 if runner is not None:
                     runner.cancel()
 
-                    with suppress(asyncio.CancelledError):
-                        await runner
-
-                await connection.disconnect(force=True)
+                try:
+                    await connection.disconnect(force=True)
+                finally:
+                    if runner is not None:
+                        # ponytail: may wait for backoff; override poller for immediate shutdown.
+                        with suppress(asyncio.CancelledError):
+                            await runner
         finally:
             if http is not None:
                 await http.close()

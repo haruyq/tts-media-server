@@ -1,6 +1,10 @@
+import asyncio
 import unittest
 from io import BytesIO
 from unittest.mock import AsyncMock, Mock, patch
+
+from aiohttp import WSMessage, WSMsgType
+from discord.gateway import DiscordVoiceWebSocket
 
 from utils.discord.backend import DiscordVoiceBackend
 from utils.discord.client import ExternalVoiceClient
@@ -42,6 +46,117 @@ class DiscordVoiceBackendTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(backend.voice)
         self.assertIsNone(backend.http)
+
+    async def test_rejects_exhausted_voice_handshakes(self):
+        backend = DiscordVoiceBackend()
+        credentials = VoiceCredentials(1, 2, 3, "session", "endpoint", "token")
+        socket = AsyncMock(close_code=4006)
+        socket.receive.return_value = WSMessage(WSMsgType.CLOSE, 4006, "")
+
+        try:
+            with (
+                patch.object(VoiceHTTPClient, "ws_connect", return_value=socket) as connect,
+                patch("discord.voice_state.asyncio.sleep", new_callable=AsyncMock),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "Not connected to Discord Voice"):
+                    await backend.connect(credentials)
+
+            self.assertEqual(connect.await_count, 5)
+            self.assertIsNone(backend.voice)
+            self.assertIsNone(backend.http)
+        finally:
+            await backend.close()
+
+    async def test_closes_voice_after_reconnect_dns_error(self):
+        backend = DiscordVoiceBackend()
+        credentials = VoiceCredentials(1, 2, 3, "session", "endpoint", "token")
+        http = VoiceHTTPClient()
+        voice = ExternalVoiceClient(credentials, http)
+        backend.voice = voice
+        backend.http = http
+        connection = voice._connection
+        socket = AsyncMock(close_code=1006)
+        socket.receive.return_value = WSMessage(WSMsgType.ERROR, OSError("Connection lost"), "")
+        connection.ws = DiscordVoiceWebSocket(socket, asyncio.get_running_loop())
+        connection.ws._connection = connection
+
+        try:
+            with (
+                patch.object(http, "ws_connect", side_effect=OSError("DNS lookup failed")),
+                patch("discord.voice_state.ExponentialBackoff.delay", return_value=0),
+            ):
+                runner = asyncio.create_task(connection._poll_voice_ws(True))
+                connection._runner = runner
+                done, _ = await asyncio.wait([runner], timeout=1)
+                self.assertIn(runner, done)
+
+                with self.assertRaisesRegex(OSError, "DNS lookup failed"):
+                    await backend.close()
+
+            self.assertEqual(connection.socket.fileno(), -1)
+            self.assertTrue(connection._socket_reader._end.is_set())
+            self.assertTrue(http.session.closed)
+        finally:
+            await connection.disconnect(force=True)
+            await http.close()
+
+    async def test_closes_voice_when_cancellation_overlaps_received_frame(self):
+        for message in (
+            WSMessage(WSMsgType.TEXT, '{"op":6,"d":0}', ""),
+            WSMessage(WSMsgType.CLOSED, None, ""),
+            WSMessage(WSMsgType.ERROR, OSError("Connection lost"), ""),
+        ):
+            with self.subTest(message=message.type):
+                backend = DiscordVoiceBackend()
+                http = VoiceHTTPClient()
+                credentials = VoiceCredentials(1, 2, 3, "session", "endpoint", "token")
+                voice = ExternalVoiceClient(credentials, http)
+                backend.voice = voice
+                backend.http = http
+                connection = voice._connection
+                await connection._voice_connect()
+                received = asyncio.Event()
+                closed = asyncio.Event()
+
+                async def receive():
+                    if not received.is_set():
+                        received.set()
+                        return message
+
+                    await closed.wait()
+                    return WSMessage(WSMsgType.CLOSED, None, "")
+
+                async def close():
+                    await received.wait()
+                    await backend.close()
+
+                socket = AsyncMock(close_code=1006)
+                socket.receive.side_effect = receive
+                socket.close.side_effect = lambda **kwargs: closed.set()
+                connection.ws = DiscordVoiceWebSocket(socket, asyncio.get_running_loop())
+                connection.ws._connection = connection
+
+                with (
+                    patch.object(http, "ws_connect", side_effect=AssertionError("Reconnected after close")) as connect,
+                    patch("discord.voice_state.ExponentialBackoff.delay", return_value=0),
+                ):
+                    closing = asyncio.create_task(close())
+                    runner = asyncio.create_task(connection._poll_voice_ws(True))
+                    connection._runner = runner
+
+                    try:
+                        done, _ = await asyncio.wait([closing], timeout=1)
+                        self.assertIn(closing, done)
+                        await closing
+                        self.assertTrue(runner.done())
+                        self.assertEqual(connection.socket.fileno(), -1)
+                        self.assertTrue(http.session.closed)
+                        connect.assert_not_awaited()
+                    finally:
+                        runner.cancel()
+                        await asyncio.gather(runner, closing, return_exceptions=True)
+                        await connection.disconnect(force=True)
+                        await http.close()
 
     async def test_plays_audio_data(self):
         backend = DiscordVoiceBackend()

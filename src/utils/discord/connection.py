@@ -1,3 +1,4 @@
+import asyncio
 import socket
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,9 @@ class ExternalVoiceConnectionState(VoiceConnectionState):
         self_deaf: bool = False,
         self_mute: bool = False,
     ) -> None:
+        if self._socket_reader._end.is_set():
+            raise asyncio.CancelledError
+
         self.server_id = self.credentials.guild_id
         self.session_id = self.credentials.voice_session_id
         self.token = self.credentials.token
