@@ -1,4 +1,5 @@
 import asyncio
+import importlib.util
 import subprocess
 import sys
 import unittest
@@ -7,6 +8,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
+from aiohttp import web
 
 from routers.plugins import list_speakers, list_styles
 from utils.exceptions import PluginNotFound
@@ -297,3 +300,118 @@ class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
             response,
             {"voicevox": {"ずんだもん": ["ノーマル", "あまあま"]}},
         )
+
+def load_plugin_module(name: str):
+    path = Path(__file__).parents[1] / "plugins" / name / "plugin.py"
+    spec = importlib.util.spec_from_file_location(f"{name}_plugin", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+class AitalkedPluginTest(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.requests = []
+        app = web.Application()
+        app.router.add_get("/api/voices", self._voices)
+        app.router.add_post("/api/tts", self._tts)
+        self.runner = web.AppRunner(app)
+        await self.runner.setup()
+        site = web.TCPSite(self.runner, "127.0.0.1", 0)
+        await site.start()
+        port = site._server.sockets[0].getsockname()[1]
+        self.plugin = load_plugin_module("aitalked").AitalkedPlugin()
+        self.plugin.configure({"base_url": f"http://127.0.0.1:{port}/"})
+
+    async def asyncTearDown(self):
+        await self.runner.cleanup()
+
+    async def _voices(self, _):
+        return web.json_response([
+            {"id": "akane_west_44", "name": "琴葉 茜", "dialect": "Kansai"},
+            {"id": "aoi_44", "name": "琴葉 葵", "dialect": "Standard"},
+            {"id": "aoi_emo_44", "name": "琴葉 葵", "dialect": "Standard"},
+        ])
+
+    async def _tts(self, request):
+        body = await request.json()
+        self.requests.append(body)
+
+        if body["text"] == "error":
+            return web.Response(status=400, text="synthesis failed")
+
+        if body["text"] == "broken":
+            return web.Response(text="not audio")
+
+        return web.Response(
+            body=b"RIFF\x00\x00\x00\x00WAVEfmt ",
+            content_type="audio/wav",
+        )
+
+    async def test_lists_speakers_and_dialect_styles(self):
+        speakers, styles = await asyncio.gather(
+            self.plugin.speakers(),
+            self.plugin.styles(),
+        )
+
+        self.assertEqual(
+            speakers,
+            ["琴葉 茜", "琴葉 葵 (aoi_44)", "琴葉 葵 (aoi_emo_44)"],
+        )
+        self.assertEqual(styles["琴葉 茜"], ["関西弁", "標準"])
+        self.assertEqual(styles["琴葉 葵 (aoi_44)"], ["標準", "関西弁"])
+
+    async def test_synthesizes_with_options(self):
+        audio = await self.plugin.synthesize(
+            "こんにちは",
+            "琴葉 茜",
+            {"style": "標準", "speed": 1.2, "pause_long": 400},
+        )
+        default = await self.plugin.synthesize("こんにちは", "琴葉 茜", {})
+
+        self.assertTrue(audio.startswith(b"RIFF"))
+        self.assertTrue(default.startswith(b"RIFF"))
+        self.assertEqual(
+            self.requests,
+            [
+                {
+                    "voice_id": "akane_west_44",
+                    "text": "こんにちは",
+                    "is_kansai": False,
+                    "speed": 1.2,
+                    "pause_long": 400,
+                },
+                {
+                    "voice_id": "akane_west_44",
+                    "text": "こんにちは",
+                    "is_kansai": True,
+                },
+            ],
+        )
+
+    async def test_rejects_invalid_requests(self):
+        cases = [
+            ("こんにちは", "missing", {}, "Speaker not found"),
+            ("こんにちは", "琴葉 茜", {"style": "怒り"}, "Style not found"),
+            ("こんにちは", "琴葉 茜", {"volume": 6}, "volume"),
+            ("こんにちは", "琴葉 茜", {"pause_long": 1.5}, "pause_long"),
+            ("こんにちは", "琴葉 茜", {"unknown": 1}, "Unknown"),
+            ("error", "琴葉 茜", {}, "synthesis failed"),
+        ]
+
+        for text, speaker, options, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    await self.plugin.synthesize(text, speaker, options)
+
+        with self.assertRaisesRegex(RuntimeError, "non-WAV"):
+            await self.plugin.synthesize("broken", "琴葉 茜", {})
+
+    def test_rejects_invalid_config(self):
+        for config in (
+            {"base_url": ""},
+            {"timeout": 0},
+            {"unknown": True},
+        ):
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    self.plugin.configure(config)
