@@ -1,9 +1,12 @@
 import asyncio
+import contextlib
 import io
 import json
 import logging
 import math
+import os
 import re
+import sys
 import threading
 import time
 import warnings
@@ -15,6 +18,13 @@ from pathlib import Path
 from typing import Any
 
 Log = logging.getLogger(__name__)
+# プラグインプロセスではloggingが設定されないため、情報ログも標準エラー出力へ
+# 出力する。API本体がプラグイン名を付けてログへ転送する
+_log_handler = logging.StreamHandler()
+_log_handler.setFormatter(logging.Formatter("%(message)s"))
+Log.addHandler(_log_handler)
+Log.setLevel(logging.INFO)
+Log.propagate = False
 
 warnings.filterwarnings(
     "ignore",
@@ -25,6 +35,14 @@ warnings.filterwarnings(
     "ignore",
     message="Cython version is not available",
     category=UserWarning,
+)
+# 依存ライブラリ内の軽微な記述による警告で、バイトコードを保存しない環境では
+# 読み込みのたびに出力される
+warnings.filterwarnings(
+    "ignore",
+    message='"is not" with a literal',
+    category=SyntaxWarning,
+    module=r".*tacotron_cleaner",
 )
 # 旧形式のモデルを読み込むたびに出力される、識別器の追加学習に関する警告。
 # 識別器は読み込み後に破棄するため、推論には影響しない
@@ -143,9 +161,10 @@ class CoeiroinkPlugin:
         self._device = self._resolve_device(device)
         self._max_loaded_models = max_loaded_models
         self._warm_up()
+        styles = sum(len(styles) for styles in self._speakers.values())
         Log.info(
-            f"Loaded {len(self._speakers)} COEIROINK speakers "
-            f"(device: {self._device})"
+            f"Found {len(self._speakers)} COEIROINK speakers "
+            f"({styles} styles)"
         )
 
     async def speakers(self) -> list[str]:
@@ -329,15 +348,40 @@ class CoeiroinkPlugin:
         return False
 
     def _warm_up(self) -> None:
+        # ESPnetが読み込む英語用G2PはNLTKのデータを取得するため、コンテナの
+        # 再作成ごとに取得し直さないよう、永続化されるruntime内へ保存する
+        nltk_data = Path(sys.prefix) / "nltk_data"
+        nltk_data.mkdir(exist_ok=True)
+        os.environ.setdefault("NLTK_DATA", str(nltk_data))
+
         import torch
 
-        from espnet2.bin.tts_inference import Text2Speech  # noqa: F401
         from espnet2.text.phoneme_tokenizer import pyopenjtalk_g2p_prosody
+
+        # flash_attnは任意の依存関係で、VITSでは使用されないため、
+        # 読み込み失敗時に標準出力へ書かれるメッセージを表示しない
+        with contextlib.redirect_stdout(io.StringIO()):
+            from espnet2.bin.tts_inference import Text2Speech  # noqa: F401
 
         pyopenjtalk_g2p_prosody("あ")
 
-        if self._device != "cpu":
-            torch.zeros(1, device=self._device)
+        if self._device == "cpu":
+            if torch.cuda.is_available():
+                Log.info("Using CPU")
+            else:
+                cuda = torch.version.cuda or "not built with CUDA"
+                Log.info(f"Using CPU (CUDA is not available, PyTorch: {cuda})")
+
+            return
+
+        device = torch.device(self._device)
+        torch.zeros(1, device=device)
+        properties = torch.cuda.get_device_properties(device)
+        Log.info(
+            f"Using {self._device}: {properties.name} "
+            f"({properties.total_memory / 1024 ** 3:.1f} GiB, "
+            f"CUDA {torch.version.cuda})"
+        )
 
     def _release_memory(self) -> None:
         import gc

@@ -532,7 +532,8 @@ class CoeiroinkPluginTest(unittest.IsolatedAsyncioTestCase):
             "uuid-a",
             {"のーまる": 20},
         )
-        plugin_class = load_plugin_module("coeiroink").CoeiroinkPlugin
+        self.module = load_plugin_module("coeiroink")
+        plugin_class = self.module.CoeiroinkPlugin
         warm_up = patch.object(plugin_class, "_warm_up")
         warm_up.start()
         self.addCleanup(warm_up.stop)
@@ -580,7 +581,7 @@ class CoeiroinkPluginTest(unittest.IsolatedAsyncioTestCase):
             encoding="utf-8",
         )
 
-        with self.assertLogs(level="WARNING") as logs:
+        with self.assertLogs(self.module.Log, "WARNING") as logs:
             self.plugin.configure({
                 "speaker_info_dir": str(self.speaker_info),
                 "device": "cpu",
