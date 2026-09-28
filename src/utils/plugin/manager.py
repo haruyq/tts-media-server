@@ -1,11 +1,13 @@
 import asyncio
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ from typing import Any, Protocol
 from utils.config import RUNTIME_NAME, settings
 from utils.exceptions import PluginNotFound
 from utils.logger import Logger
+from utils.plugin.progress import RuntimeProgress
 from utils.plugin.protocol import (
     PluginProtocolError,
     read_frame,
@@ -23,6 +26,8 @@ from utils.plugin.protocol import (
 
 Log = Logger(__name__)
 _runtime_name = re.compile(f"^{RUNTIME_NAME}$")
+# uvの出力が途切れている間に、進捗を再表示する間隔 (秒)
+_progress_interval = 15
 
 class TTSPlugin(Protocol):
     async def speakers(self) -> list[str]:
@@ -522,6 +527,8 @@ class PluginManager:
             raise RuntimeError("uv is required to install plugin runtimes")
 
         runtime_path.mkdir(parents=True, exist_ok=True)
+        Log.info(f"Preparing plugin runtime: {runtime}")
+        started = time.monotonic()
 
         create_option = "--clear" if python.is_file() else "--allow-existing"
         self._run_uv(
@@ -554,23 +561,52 @@ class PluginManager:
             self._run_uv(runtime, command)
 
         state_path.write_text(state, encoding="utf-8")
+        elapsed = time.monotonic() - started
+        Log.info(f"Plugin runtime ready: {runtime} ({elapsed:.1f}s)")
 
     def _run_uv(self, runtime: str, command: list[str]) -> None:
-        Log.info(f"Preparing plugin runtime: {runtime}")
+        progress = RuntimeProgress(runtime, Log)
+        lines: queue.Queue[str | None] = queue.Queue()
+        output = []
 
-        try:
-            subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-            )
-        except subprocess.CalledProcessError as exception:
-            detail = (exception.stderr or exception.stdout or "").strip()
+        with subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env={**os.environ, "NO_COLOR": "1"},
+        ) as process:
+            def read_output() -> None:
+                for line in process.stdout:
+                    lines.put(line)
+
+                lines.put(None)
+
+            reader = threading.Thread(target=read_output, daemon=True)
+            reader.start()
+
+            while True:
+                try:
+                    line = lines.get(timeout=_progress_interval)
+                except queue.Empty:
+                    progress.tick()
+                    continue
+
+                if line is None:
+                    break
+
+                output.append(line)
+                progress.feed(line)
+
+            reader.join()
+
+        if process.returncode != 0:
+            detail = "".join(output).strip()
             raise RuntimeError(
                 f"Unable to prepare plugin runtime '{runtime}': {detail}"
-            ) from exception
+            )
 
     def _runtime_python(self, runtime: str) -> Path:
         directory = self._runtime_dir / runtime

@@ -1,13 +1,13 @@
 import asyncio
 import importlib.util
 import json
-import subprocess
 import sys
 import unittest
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
+from logging import getLogger as Logger
 from unittest.mock import AsyncMock, patch
 
 from aiohttp import web
@@ -15,6 +15,7 @@ from aiohttp import web
 from routers.plugins import list_speakers, list_styles
 from utils.exceptions import PluginNotFound
 from utils.plugin.manager import PluginDefinition, PluginManager, PluginProcess
+from utils.plugin.progress import RuntimeProgress
 
 def write_plugin(
     directory: Path,
@@ -102,7 +103,7 @@ class PluginManagerTest(unittest.TestCase):
             manager = PluginManager(runtime_dir=runtime_dir)
             commands = []
 
-            def run(command, **_):
+            def run(_, command):
                 commands.append(command)
 
                 if command[1] == "venv":
@@ -110,11 +111,9 @@ class PluginManagerTest(unittest.TestCase):
                     python.parent.mkdir(parents=True)
                     python.touch()
 
-                return subprocess.CompletedProcess(command, 0)
-
             with (
                 patch("utils.plugin.manager.shutil.which", return_value="uv"),
-                patch("utils.plugin.manager.subprocess.run", side_effect=run),
+                patch.object(manager, "_run_uv", side_effect=run),
             ):
                 dependencies = ["demo>=1", "torch>=2.8"]
                 manager._prepare_runtime("torch-cu128", dependencies)
@@ -130,6 +129,73 @@ class PluginManagerTest(unittest.TestCase):
             "cu128",
         )
         self.assertEqual(commands[1][-3:], ["--", "demo>=1", "torch>=2.8"])
+
+    def test_reports_runtime_progress(self):
+        output = (
+            "Using Python 3.11.9 environment at: runtime\n"
+            "Resolved 3 packages in 1.00s\n"
+            "   Building pyworld==0.3.5\n"
+            "Downloading torch (1.5GiB)\n"
+            "Downloading numpy (512.0MiB)\n"
+            " Downloaded numpy\n"
+            "      Built pyworld==0.3.5\n"
+            " Downloaded torch\n"
+            "Prepared 3 packages in 2.00s\n"
+            "Installed 3 packages in 3.00s\n"
+            " + numpy==2.4.6\n"
+        )
+        command = [
+            sys.executable,
+            "-c",
+            f"import sys; sys.stderr.write({output!r})",
+        ]
+        manager = PluginManager()
+
+        with self.assertLogs("utils.plugin.manager", "INFO") as logs:
+            manager._run_uv("torch-auto", command)
+
+        messages = [record.getMessage() for record in logs.records]
+        self.assertEqual(len(messages), 7)
+        self.assertTrue(messages[0].startswith("[torch-auto] Resolved 3"))
+        self.assertIn("Building pyworld==0.3.5", messages[1])
+        self.assertIn(
+            "[#####---------------]  25% 512.0 MiB / 2.0 GiB (1/2 files)"
+            " - numpy",
+            messages[2],
+        )
+        self.assertIn(
+            "[####################] 100% 2.0 GiB / 2.0 GiB (2/2 files)"
+            " - torch",
+            messages[4],
+        )
+        self.assertIn("Installed 3 packages", messages[6])
+
+        with self.assertRaisesRegex(RuntimeError, "resolution failed"):
+            manager._run_uv(
+                "torch-auto",
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print('resolution failed'); sys.exit(1)",
+                ],
+            )
+
+    def test_reports_waiting_downloads(self):
+        progress = RuntimeProgress("python", Logger("progress-test"))
+        progress.feed("Resolved 3 packages in 1.00s")
+
+        with self.assertLogs("progress-test", "INFO") as logs:
+            progress.tick()
+            progress.feed("Downloading torch (1.0GiB)")
+            progress.feed("Downloading numpy (16.0MiB)")
+            progress.tick()
+
+        self.assertIn("Still downloading", logs.records[0].getMessage())
+        self.assertIn(
+            "0% 0 B / 1.0 GiB (0/2 files) - waiting for "
+            "torch (1.0 GiB), numpy (16.0 MiB)",
+            logs.records[1].getMessage(),
+        )
 
 class PluginManagerAsyncTest(unittest.IsolatedAsyncioTestCase):
     async def test_resolves_shared_runtime_dependencies_together(self):
