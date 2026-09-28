@@ -558,6 +558,39 @@ class CoeiroinkPluginTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(styles["つくよみちゃん"], ["れいせい", "おこ"])
 
+    async def test_skips_uninstalled_models(self):
+        metas_path = self.speaker_info / "uuid-b" / "metas.json"
+        metas = json.loads(metas_path.read_text(encoding="utf-8"))
+        metas["styles"].append({"styleName": "げんき", "styleId": 6})
+        metas_path.write_text(json.dumps(metas), encoding="utf-8")
+        (self.speaker_info / "unextracted").mkdir()
+        (self.speaker_info / "unextracted" / "DATA.zip").touch()
+        write_coeiroink_speaker(
+            self.speaker_info,
+            "未導入",
+            "uuid-d",
+            {},
+        )
+        (self.speaker_info / "uuid-d" / "metas.json").write_text(
+            json.dumps({
+                "speakerName": "未導入",
+                "speakerUuid": "uuid-d",
+                "styles": [{"styleName": "のーまる", "styleId": 30}],
+            }),
+            encoding="utf-8",
+        )
+
+        with self.assertLogs(level="WARNING") as logs:
+            self.plugin.configure({
+                "speaker_info_dir": str(self.speaker_info),
+                "device": "cpu",
+            })
+
+        styles = await self.plugin.styles()
+        self.assertEqual(styles["つくよみちゃん"], ["れいせい", "おこ"])
+        self.assertNotIn("未導入", styles)
+        self.assertEqual(len(logs.records), 4)
+
     async def test_resolves_style_and_options(self):
         with patch.object(
             self.plugin,

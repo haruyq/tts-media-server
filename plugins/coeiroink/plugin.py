@@ -26,6 +26,12 @@ warnings.filterwarnings(
     message="Cython version is not available",
     category=UserWarning,
 )
+# 旧形式のモデルを読み込むたびに出力される、識別器の追加学習に関する警告。
+# 識別器は読み込み後に破棄するため、推論には影響しない
+logging.getLogger().addFilter(
+    lambda record: "weight norm is not applied in the pretrained model"
+    not in record.getMessage()
+)
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 DEVICE = re.compile(r"auto|cpu|cuda(?::\d+)?")
@@ -457,6 +463,14 @@ class CoeiroinkPlugin:
 
             metas_path = speaker_path / "metas.json"
 
+            if not metas_path.exists():
+                # 展開前のアーカイブ等、話者以外のディレクトリは読み飛ばす
+                Log.warning(
+                    f"Skipping COEIROINK directory without metas.json: "
+                    f"{speaker_path}"
+                )
+                continue
+
             try:
                 metas = json.loads(metas_path.read_text(encoding="utf-8"))
                 name = metas["speakerName"]
@@ -513,6 +527,16 @@ class CoeiroinkPlugin:
                     )
 
                 model_dir = speaker_path / "model" / str(style_id)
+
+                if not model_dir.exists():
+                    # 公式話者は全スタイルのメタデータを含むが、モデルは
+                    # スタイルごとに導入されるため、未導入のスタイルは除く
+                    Log.warning(
+                        f"Skipping COEIROINK style without model: "
+                        f"{name}/{style_name}"
+                    )
+                    continue
+
                 config_path = model_dir / "config.yaml"
                 model_paths = sorted(model_dir.glob("*.pth"))
 
@@ -528,6 +552,12 @@ class CoeiroinkPlugin:
                     config_path,
                     model_paths[0],
                 )
+
+            if not styles:
+                Log.warning(
+                    f"Skipping COEIROINK speaker without models: {name}"
+                )
+                continue
 
             loaded.append((
                 min(style.style_id for style in styles.values()),
