@@ -26,6 +26,10 @@ from utils.plugin.protocol import (
 
 Log = Logger(__name__)
 _runtime_name = re.compile(f"^{RUNTIME_NAME}$")
+_venv_version = re.compile(
+    r"^version(?:_info)?\s*=\s*(\d+)\.(\d+)",
+    re.MULTILINE,
+)
 # uvの出力が途切れている間に、進捗を再表示する間隔 (秒)
 _progress_interval = 15
 
@@ -527,10 +531,21 @@ class PluginManager:
             raise RuntimeError("uv is required to install plugin runtimes")
 
         runtime_path.mkdir(parents=True, exist_ok=True)
-        Log.info(f"Preparing plugin runtime: {runtime}")
         started = time.monotonic()
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
 
-        create_option = "--clear" if python.is_file() else "--allow-existing"
+        # 依存関係の変更時は既存の環境へ差分だけを適用し、torch等の巨大な
+        # パッケージを再取得しない。Pythonのバージョンが変わった場合だけ作り直す
+        if (
+            python.is_file()
+            and self._runtime_version(runtime_path) == python_version
+        ):
+            Log.info(f"Updating plugin runtime: {runtime}")
+            create_option = "--allow-existing"
+        else:
+            Log.info(f"Creating plugin runtime: {runtime}")
+            create_option = "--clear"
+
         self._run_uv(
             runtime,
             [
@@ -607,6 +622,16 @@ class PluginManager:
             raise RuntimeError(
                 f"Unable to prepare plugin runtime '{runtime}': {detail}"
             )
+
+    @staticmethod
+    def _runtime_version(runtime_path: Path) -> str | None:
+        try:
+            config = (runtime_path / "pyvenv.cfg").read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+        match = _venv_version.search(config)
+        return f"{match[1]}.{match[2]}" if match else None
 
     def _runtime_python(self, runtime: str) -> Path:
         directory = self._runtime_dir / runtime

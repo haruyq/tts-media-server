@@ -130,6 +130,44 @@ class PluginManagerTest(unittest.TestCase):
         )
         self.assertEqual(commands[1][-3:], ["--", "demo>=1", "torch>=2.8"])
 
+    def test_updates_runtime_in_place_unless_python_changes(self):
+        with TemporaryDirectory() as directory:
+            manager = PluginManager(runtime_dir=Path(directory))
+            python = manager._runtime_python("python")
+            python.parent.mkdir(parents=True)
+            python.touch()
+            config = Path(directory) / "python" / "pyvenv.cfg"
+            commands = []
+
+            with (
+                patch("utils.plugin.manager.shutil.which", return_value="uv"),
+                patch.object(
+                    manager,
+                    "_run_uv",
+                    side_effect=lambda _, command: commands.append(command),
+                ),
+            ):
+                config.write_text(
+                    "home = /usr/local/bin\n"
+                    f"version_info = {sys.version_info.major}."
+                    f"{sys.version_info.minor}.0\n",
+                    encoding="utf-8",
+                )
+                manager._prepare_runtime("python", ["demo>=1"])
+                manager._prepare_runtime("python", ["demo>=1", "extra>=1"])
+                config.write_text("version_info = 2.7.18\n", encoding="utf-8")
+                manager._prepare_runtime("python", ["demo>=1"])
+
+        venv_options = [
+            command[-2]
+            for command in commands
+            if command[1] == "venv"
+        ]
+        self.assertEqual(
+            venv_options,
+            ["--allow-existing", "--allow-existing", "--clear"],
+        )
+
     def test_reports_runtime_progress(self):
         output = (
             "Using Python 3.11.9 environment at: runtime\n"

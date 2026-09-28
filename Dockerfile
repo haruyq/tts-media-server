@@ -13,14 +13,16 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# プラグインのruntimeを再構築する際にtorch等を再取得しないよう、uvのキャッシュを
+# runtimeと同じボリュームへ置く。同じファイルシステム上ではハードリンクで展開される
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    UV_NO_CACHE=1 \
+    UV_CACHE_DIR=/home/app/.cache/tts-media-server/runtimes/.uv-cache \
     UV_PYTHON_DOWNLOADS=0
 
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-dev --no-install-project
+RUN uv sync --locked --no-dev --no-install-project --no-cache
 
 COPY src ./src
 COPY plugins ./plugins
