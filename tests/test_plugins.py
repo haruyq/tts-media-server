@@ -1,5 +1,6 @@
 import asyncio
 import importlib.util
+import json
 import subprocess
 import sys
 import unittest
@@ -415,3 +416,147 @@ class AitalkedPluginTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(config=config):
                 with self.assertRaises(ValueError):
                     self.plugin.configure(config)
+
+def write_coeiroink_speaker(
+    directory: Path,
+    name: str,
+    speaker_uuid: str,
+    styles: dict[str, int],
+) -> None:
+    speaker_dir = directory / speaker_uuid
+    speaker_dir.mkdir()
+    (speaker_dir / "metas.json").write_text(
+        json.dumps({
+            "speakerName": name,
+            "speakerUuid": speaker_uuid,
+            "styles": [
+                {"styleName": style_name, "styleId": style_id}
+                for style_name, style_id in styles.items()
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    for style_id in styles.values():
+        model_dir = speaker_dir / "model" / str(style_id)
+        model_dir.mkdir(parents=True)
+        (model_dir / "config.yaml").touch()
+        (model_dir / "100epoch.pth").touch()
+
+class CoeiroinkPluginTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.directory = TemporaryDirectory()
+        self.speaker_info = Path(self.directory.name) / "speaker_info"
+        self.speaker_info.mkdir()
+        write_coeiroink_speaker(
+            self.speaker_info,
+            "つくよみちゃん",
+            "uuid-b",
+            {"れいせい": 0, "おこ": 5},
+        )
+        write_coeiroink_speaker(
+            self.speaker_info,
+            "話者",
+            "uuid-c",
+            {"のーまる": 10},
+        )
+        write_coeiroink_speaker(
+            self.speaker_info,
+            "話者",
+            "uuid-a",
+            {"のーまる": 20},
+        )
+        plugin_class = load_plugin_module("coeiroink").CoeiroinkPlugin
+        warm_up = patch.object(plugin_class, "_warm_up")
+        warm_up.start()
+        self.addCleanup(warm_up.stop)
+        self.plugin = plugin_class()
+        self.plugin.configure({
+            "speaker_info_dir": str(self.speaker_info),
+            "device": "cpu",
+            "max_loaded_models": 2,
+        })
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    async def test_lists_speakers_and_styles(self):
+        speakers, styles = await asyncio.gather(
+            self.plugin.speakers(),
+            self.plugin.styles(),
+        )
+
+        self.assertEqual(
+            speakers,
+            ["つくよみちゃん", "話者 (uuid-c)", "話者 (uuid-a)"],
+        )
+        self.assertEqual(styles["つくよみちゃん"], ["れいせい", "おこ"])
+
+    async def test_resolves_style_and_options(self):
+        with patch.object(
+            self.plugin,
+            "_synthesize",
+            return_value=b"RIFF",
+        ) as synthesize:
+            await self.plugin.synthesize(
+                "こんにちは",
+                "つくよみちゃん",
+                {"style": "おこ", "speed_scale": 1.5, "pitch_scale": -0.1},
+            )
+            await self.plugin.synthesize("こんにちは", "つくよみちゃん", {})
+
+        first, second = synthesize.call_args_list
+        self.assertEqual(first.args[0].style_id, 5)
+        self.assertEqual(
+            first.args[2],
+            {
+                "speed_scale": 1.5,
+                "volume_scale": 1.0,
+                "pitch_scale": -0.1,
+                "intonation_scale": 1.0,
+            },
+        )
+        self.assertEqual(second.args[0].style_id, 0)
+
+    async def test_rejects_invalid_requests(self):
+        cases = [
+            ("こんにちは", "missing", {}, "Speaker not found"),
+            ("こんにちは", "つくよみちゃん", {"style": "ない"}, "Style"),
+            ("こんにちは", "つくよみちゃん", {"speed_scale": 0}, "speed"),
+            ("こんにちは", "つくよみちゃん", {"volume_scale": True}, "volume"),
+            ("こんにちは", "つくよみちゃん", {"unknown": 1}, "Unknown"),
+            ("  ", "つくよみちゃん", {}, "non-empty"),
+        ]
+
+        for text, speaker, options, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    await self.plugin.synthesize(text, speaker, options)
+
+    def test_rejects_invalid_config(self):
+        empty = Path(self.directory.name) / "empty"
+        empty.mkdir()
+        broken = self.speaker_info / "uuid-c" / "model" / "10" / "100epoch.pth"
+        cases = [
+            {"unknown": True},
+            {"speaker_info_dir": str(self.speaker_info), "device": "gpu"},
+            {
+                "speaker_info_dir": str(self.speaker_info),
+                "max_loaded_models": 0,
+            },
+            {"speaker_info_dir": str(self.speaker_info / "missing")},
+            {"speaker_info_dir": str(empty)},
+        ]
+
+        for config in cases:
+            with self.subTest(config=config):
+                with self.assertRaises(ValueError):
+                    self.plugin.configure({"device": "cpu", **config})
+
+        broken.unlink()
+
+        with self.assertRaisesRegex(ValueError, "exactly one .pth"):
+            self.plugin.configure({
+                "speaker_info_dir": str(self.speaker_info),
+                "device": "cpu",
+            })

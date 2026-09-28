@@ -146,6 +146,7 @@ class ConfigTest(unittest.TestCase):
                 "voicevox": "python",
                 "kokoro_82m": "python",
                 "aitalked": "python",
+                "coeiroink": "torch-auto",
             },
         )
 

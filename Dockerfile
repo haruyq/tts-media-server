@@ -5,7 +5,7 @@ FROM python:3.11-slim-bookworm
 COPY --from=ghcr.io/astral-sh/uv:0.11.17 /uv /bin/uv
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg git \
+    && apt-get install -y --no-install-recommends ffmpeg g++ git \
     && useradd --system --create-home app \
     && mkdir -p /home/app/.cache/tts-media-server/runtimes \
     && chown -R app:app /home/app/.cache \

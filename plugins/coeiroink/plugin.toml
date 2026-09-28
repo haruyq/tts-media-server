@@ -1,0 +1,11 @@
+api_version = 1
+entrypoint = "plugin.py"
+dependencies = [
+    "espnet>=202511",
+    "jaconv>=0.4,<1",
+    "numpy>=1.26",
+    "pyopenjtalk-plus[onnxruntime]>=0.4.1",
+    "pyworld>=0.3.5,<0.4",
+    "torch>=2.6,<2.12",
+    "torchaudio>=2.6,<2.12",
+]
