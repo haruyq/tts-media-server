@@ -3,7 +3,7 @@ import json
 from types import SimpleNamespace
 import unittest
 
-from manual_discord_bot import TTSBot, client_url
+from tests.manual_discord_bot import TTSBot, client_url
 
 class WebSocket:
     def __init__(self, bot: TTSBot) -> None:

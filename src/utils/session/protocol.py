@@ -3,7 +3,6 @@ import re
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from textwrap import wrap
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -20,8 +19,98 @@ credentials_adapter = TypeAdapter(VoiceCredentials)
 speech_adapter = TypeAdapter(SpeechRequest)
 Log = Logger(__name__)
 
-_sentence_end = re.compile(r"[。！？.!?]+[」』）】”’\"')\]}]*")
+# 常に文末として扱う記号 (CJK、アラビア語、ウルドゥー語、デーヴァナーガリー、
+# エチオピア文字、アルメニア文字、ミャンマー文字、クメール文字)
+_terminators = "。｡！？‼⁇⁈⁉؟۔।॥።፧։။។"
+# 小数、バージョン番号、URL及び略語にも使われるため、前後の文字で判定する記号
+_ambiguous_terminators = ".!?．"
+_closers = "」』）】〉》〕］｝”’\"')\\]}»"
+_sentence_end = re.compile(
+    rf"[{_terminators}{_ambiguous_terminators}]+[{_closers}]*"
+)
+# 文の区切りに空白を使わない文字 (CJK記号、かな、漢字、半角カナ)
+_no_space_script = re.compile(
+    "[\u3000-\u303f\u3040-\u30ff\u3400-\u4dbf"
+    "\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]"
+)
+_openers = "\"'([{「『（【“‘«¿¡"
+# ピリオドの直後に空白があっても文末として扱わない略語 (小文字、ピリオドなし)
+_abbreviations = frozenset({
+    # 英語
+    "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "mt", "vs",
+    "etc", "inc", "ltd", "co", "corp", "dept", "approx", "est",
+    "gen", "gov", "capt", "lt", "col", "sgt", "rev", "hon",
+    "ave", "blvd", "rd", "jan", "feb", "apr", "jun", "jul", "aug",
+    "sep", "sept", "oct", "nov", "dec",
+    # ドイツ語
+    "bzw", "usw", "ca", "hr", "fr", "str", "vgl", "evtl", "ggf", "inkl",
+    # フランス語、スペイン語、イタリア語
+    "mme", "mlle", "ste", "cf", "sra", "srta", "dra", "ud", "uds",
+    "sig", "dott", "ecc",
+})
+# 直後に数字が続く場合のみ略語として扱う語
+_numeric_abbreviations = frozenset({
+    "no", "nr", "vol", "fig", "p", "pp", "art", "ch", "op",
+})
+# 長すぎる文を分ける位置 (読点等の直後又は空白)
+_soft_break = re.compile(r"(?<=[、，；：،؛])\s*|\s+")
 _max_sentence_length = 200
+
+def _wrap_sentence(sentence: str) -> list[str]:
+    chunks = []
+
+    while len(sentence) > _max_sentence_length:
+        cut = rest = _max_sentence_length
+
+        for match in _soft_break.finditer(
+            sentence,
+            1,
+            _max_sentence_length + 1,
+        ):
+            cut, rest = match.start(), match.end()
+
+        chunks.append(sentence[:cut].strip())
+        sentence = sentence[rest:].strip()
+
+    if sentence:
+        chunks.append(sentence)
+
+    return chunks
+
+def _ends_sentence(line: str, match: re.Match[str]) -> bool:
+    punctuation = match.group().rstrip(_closers)
+
+    if any(char in _terminators for char in punctuation):
+        return True
+
+    preceding = line[match.start() - 1:match.start()]
+    following = line[match.end():match.end() + 1]
+
+    if _no_space_script.fullmatch(following):
+        # CJKの文中にある記号だけを文末とする (Yahoo!ニュース等を分割しない)
+        return _no_space_script.fullmatch(preceding) is not None
+
+    if following and not following.isspace():
+        return False
+
+    if punctuation != "." or not preceding or preceding.isspace():
+        return True
+
+    word = line[:match.start()].split()[-1].lstrip(_openers)
+
+    # U.S.、z.B.及びイニシャル
+    if "." in word or (len(word) == 1 and word.isalpha()):
+        return False
+
+    word = word.lower()
+
+    if word in _abbreviations:
+        return False
+
+    if word in _numeric_abbreviations:
+        return not line[match.end():].lstrip()[:1].isdigit()
+
+    return True
 
 def _split_sentences(text: str) -> list[str]:
     sentences = []
@@ -30,6 +119,9 @@ def _split_sentences(text: str) -> list[str]:
         start = 0
 
         for end in _sentence_end.finditer(line):
+            if not _ends_sentence(line, end):
+                continue
+
             sentence = line[start:end.end()].strip()
 
             if sentence:
@@ -42,18 +134,11 @@ def _split_sentences(text: str) -> list[str]:
         if sentence:
             sentences.append(sentence)
 
-    chunks = []
-
-    for sentence in sentences:
-        chunks.extend(
-            wrap(
-                sentence,
-                width=_max_sentence_length,
-                break_on_hyphens=False,
-            )
-        )
-
-    return chunks
+    return [
+        chunk
+        for sentence in sentences
+        for chunk in _wrap_sentence(sentence)
+    ]
 
 class SessionProtocol:
     def __init__(

@@ -144,13 +144,55 @@ class SessionProtocolTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(_split_sentences(" \n\t"), [])
         self.assertEqual(
-            _split_sentences("x" * 95 + " short"),
-            ["x" * 95, "short"],
+            _split_sentences("x" * 195 + " short"),
+            ["x" * 195, "short"],
         )
         self.assertEqual(
-            _split_sentences("x" * 250),
-            ["x" * 100, "x" * 100, "x" * 50],
+            _split_sentences("x" * 450),
+            ["x" * 200, "x" * 200, "x" * 50],
         )
+        self.assertEqual(
+            _split_sentences("あ" * 150 + "、" + "い" * 100),
+            ["あ" * 150 + "、", "い" * 100],
+        )
+
+    def test_splits_multilingual_sentences(self):
+        cases = {
+            "GPT-5.6が出ました。": ["GPT-5.6が出ました。"],
+            "Python 3.11.2とexample.comを使う": [
+                "Python 3.11.2とexample.comを使う",
+            ],
+            "３．１４です．次の文": ["３．１４です．", "次の文"],
+            "本当？!次へ": ["本当？!", "次へ"],
+            'He said "Wait." Then left.': [
+                'He said "Wait."',
+                "Then left.",
+            ],
+            "Wait... what?!": ["Wait...", "what?!"],
+            "你好。今天天气很好！": ["你好。", "今天天气很好！"],
+            "هل أنت بخير؟ نعم.": ["هل أنت بخير؟", "نعم."],
+            "यह ठीक है। धन्यवाद।": ["यह ठीक है।", "धन्यवाद।"],
+            "Mr. Smith met Dr. Brown. Then left.": [
+                "Mr. Smith met Dr. Brown.",
+                "Then left.",
+            ],
+            "See Fig. 3 and J. K. Rowling in the U.S. army. Next.": [
+                "See Fig. 3 and J. K. Rowling in the U.S. army.",
+                "Next.",
+            ],
+            "I said no. Then left.": ["I said no.", "Then left."],
+            "Das ist z.B. gut. Danke.": ["Das ist z.B. gut.", "Danke."],
+            "Yahoo!ニュースを見た。すごい!次へ": [
+                "Yahoo!ニュースを見た。",
+                "すごい!",
+                "次へ",
+            ],
+            "「すごい!」次へ": ["「すごい!」", "次へ"],
+        }
+
+        for text, expected in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual(_split_sentences(text), expected)
 
     async def test_lifecycle_and_owned_session_cleanup(self):
         manager = SessionManager()
