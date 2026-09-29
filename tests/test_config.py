@@ -137,7 +137,8 @@ class ConfigTest(unittest.TestCase):
             config.plugins["voicevox"],
             {
                 "enabled": True,
-                "base_url": "http://127.0.0.1:50021",
+                "core_dir": "voicevox_core",
+                "device": "auto",
             },
         )
         self.assertEqual(

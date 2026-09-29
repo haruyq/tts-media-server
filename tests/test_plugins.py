@@ -698,3 +698,38 @@ class CoeiroinkPluginTest(unittest.IsolatedAsyncioTestCase):
                 "speaker_info_dir": str(self.speaker_info),
                 "device": "cpu",
             })
+
+class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
+    async def test_resolves_style_and_options(self):
+        plugin = load_plugin_module("voicevox").VoicevoxPlugin()
+        plugin._speakers = {
+            "ずんだもん": {
+                "あまあま": (1, Path("0.vvm")),
+                "ノーマル": (3, Path("0.vvm")),
+            },
+            "春日部つむぎ": {"ヒソヒソ": (8, Path("1.vvm"))},
+        }
+
+        with patch.object(plugin, "_synthesize", return_value=b"RIFF") as run:
+            await plugin.synthesize("テスト", "ずんだもん", {})
+            await plugin.synthesize("テスト", "春日部つむぎ", {})
+            await plugin.synthesize(
+                "テスト",
+                "ずんだもん",
+                {"style": "あまあま", "speed_scale": 1.2},
+            )
+
+        self.assertEqual(
+            [call.args[1] for call in run.call_args_list],
+            [3, 8, 1],
+        )
+        self.assertEqual(run.call_args_list[2].args[3]["speed_scale"], 1.2)
+
+        for options, message in (
+            ({"style": "ない"}, "Style not found"),
+            ({"speed_scale": 0}, "speed_scale"),
+            ({"unknown": 1}, "Unknown"),
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    await plugin.synthesize("テスト", "ずんだもん", options)
