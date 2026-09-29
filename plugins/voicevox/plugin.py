@@ -65,16 +65,35 @@ class VoicevoxPlugin:
             VoiceModelFile,
         )
 
-        onnxruntime_path = (
-            path / "onnxruntime" / "lib"
-            / Onnxruntime.LIB_RECOMMENDED_VERSIONED_FILENAME
+        lib_dir = path / "onnxruntime" / "lib"
+        # CUDA版は推奨とは異なるバージョンが配布されるため、バージョンの
+        # 付かない名前も探す
+        onnxruntime_path = next(
+            (
+                lib_dir / name
+                for name in (
+                    Onnxruntime.LIB_RECOMMENDED_VERSIONED_FILENAME,
+                    Onnxruntime.LIB_RECOMMENDED_UNVERSIONED_FILENAME,
+                )
+                if (lib_dir / name).is_file()
+            ),
+            None,
         )
         dict_dirs = sorted((path / "dict").glob("open_jtalk_dic_utf_8-*"))
         vvms = sorted((path / "models" / "vvms").glob("*.vvm"))
+        missing = [
+            name
+            for name, found in (
+                (f"{lib_dir}/*onnxruntime*", onnxruntime_path),
+                (f"{path / 'dict'}/open_jtalk_dic_utf_8-*", dict_dirs),
+                (f"{path / 'models' / 'vvms'}/*.vvm", vvms),
+            )
+            if not found
+        ]
 
-        if not onnxruntime_path.is_file() or not dict_dirs or not vvms:
+        if missing:
             raise ValueError(
-                f"VOICEVOX CORE files not found: {path} "
+                f"VOICEVOX CORE files not found: {', '.join(missing)} "
                 "(run the VOICEVOX CORE downloader with --exclude c-api)"
             )
 
