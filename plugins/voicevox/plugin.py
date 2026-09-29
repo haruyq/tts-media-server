@@ -66,16 +66,19 @@ class VoicevoxPlugin:
         )
 
         lib_dir = path / "onnxruntime" / "lib"
-        # CUDA版は推奨とは異なるバージョンが配布されるため、バージョンの
-        # 付かない名前も探す
+        # CUDA版は推奨とは異なるバージョンが配布され、ダウンローダーは
+        # シンボリックリンクを展開しないため、libvoicevox_onnxruntime.so.1.17.3
+        # のようなバージョン付きの名前も探す
         onnxruntime_path = next(
             (
-                lib_dir / name
-                for name in (
-                    Onnxruntime.LIB_RECOMMENDED_VERSIONED_FILENAME,
-                    Onnxruntime.LIB_RECOMMENDED_UNVERSIONED_FILENAME,
+                library
+                for library in (
+                    lib_dir / Onnxruntime.LIB_RECOMMENDED_VERSIONED_FILENAME,
+                    *sorted(lib_dir.glob(
+                        f"{Onnxruntime.LIB_RECOMMENDED_UNVERSIONED_FILENAME}*"
+                    )),
                 )
-                if (lib_dir / name).is_file()
+                if library.is_file()
             ),
             None,
         )
