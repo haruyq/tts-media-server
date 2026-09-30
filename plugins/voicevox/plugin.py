@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -34,9 +35,18 @@ class VoicevoxPlugin:
         self._synthesizer: Any = None
         # 話者名 -> スタイル名 -> (スタイルID, VVMファイル)
         self._speakers: dict[str, dict[str, tuple[int, Path]]] = {}
+        # VVMファイル -> [モデルID, 使用回数]
+        self._loaded: OrderedDict[Path, list[Any]] = OrderedDict()
+        self._max_loaded_models = 3
+        self._reload_after = 100
 
     def configure(self, config: dict[str, Any]) -> None:
-        unknown = set(config) - {"core_dir", "device"}
+        unknown = set(config) - {
+            "core_dir",
+            "device",
+            "max_loaded_models",
+            "reload_after",
+        }
 
         if unknown:
             raise ValueError(
@@ -53,6 +63,31 @@ class VoicevoxPlugin:
         if device not in DEVICES:
             raise ValueError('voicevox.device must be "auto", "cpu" or "gpu"')
 
+        max_loaded_models = config.get("max_loaded_models", 3)
+
+        if (
+            isinstance(max_loaded_models, bool)
+            or not isinstance(max_loaded_models, int)
+            or max_loaded_models <= 0
+        ):
+            raise ValueError(
+                "voicevox.max_loaded_models must be a positive integer"
+            )
+
+        reload_after = config.get("reload_after", 100)
+
+        if (
+            isinstance(reload_after, bool)
+            or not isinstance(reload_after, int)
+            or reload_after < 0
+        ):
+            raise ValueError(
+                "voicevox.reload_after must be 0 (disabled) or "
+                "a positive integer"
+            )
+
+        self._max_loaded_models = max_loaded_models
+        self._reload_after = reload_after
         path = Path(core_dir).expanduser()
 
         if not path.is_absolute():
@@ -215,12 +250,20 @@ class VoicevoxPlugin:
 
         start = time.perf_counter()
 
-        # ponytail: 読み込んだモデルは解放しない。VRAM又はメモリが不足する
-        # 場合は、使用するVVMだけをcore_dirへ置く
-        with VoiceModelFile.open(vvm) as model:
-            if not self._synthesizer.is_loaded_voice_model(model.id):
+        # ONNX Runtimeのメモリプールは処理した最長の出力に合わせて拡張され、
+        # モデルを解放するまで縮小しない。保持するモデル数を制限し、
+        # 一定回数使用したモデルも解放して、メモリ使用量を元に戻す
+        if vvm in self._loaded:
+            self._loaded.move_to_end(vvm)
+        else:
+            while len(self._loaded) >= self._max_loaded_models:
+                self._unload(next(iter(self._loaded)))
+
+            with VoiceModelFile.open(vvm) as model:
                 self._synthesizer.load_voice_model(model)
-                Log.info(f"Loaded VOICEVOX model {vvm.name}")
+                self._loaded[vvm] = [model.id, 0]
+
+            Log.info(f"Loaded VOICEVOX model {vvm.name}")
 
         query = self._synthesizer.create_audio_query(text, style_id)
 
@@ -228,12 +271,22 @@ class VoicevoxPlugin:
             setattr(query, name, value)
 
         audio = self._synthesizer.synthesis(query, style_id)
+        self._loaded[vvm][1] += 1
+
+        if self._reload_after and self._loaded[vvm][1] >= self._reload_after:
+            self._unload(vvm)
+
         elapsed = (time.perf_counter() - start) * 1000
         Log.debug(
             f"synthesis completed in {elapsed:.2f} ms - "
             f"text length: {len(text)}"
         )
         return audio
+
+    def _unload(self, vvm: Path) -> None:
+        model_id, uses = self._loaded.pop(vvm)
+        self._synthesizer.unload_voice_model(model_id)
+        Log.info(f"Released VOICEVOX model {vvm.name} after {uses} uses")
 
     @staticmethod
     def _options(options: dict[str, Any]) -> dict[str, float]:

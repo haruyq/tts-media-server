@@ -803,3 +803,45 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(ValueError, message):
                     await plugin.synthesize("テスト", "ずんだもん", options)
+
+    def test_unloads_least_recent_and_worn_models(self):
+        plugin = load_plugin_module("voicevox").VoicevoxPlugin()
+        plugin._max_loaded_models = 2
+        plugin._reload_after = 3
+        events = []
+        synthesizer = SimpleNamespace(
+            load_voice_model=lambda model: events.append(("load", model.id)),
+            unload_voice_model=lambda id: events.append(("unload", id)),
+            create_audio_query=lambda text, style: SimpleNamespace(),
+            synthesis=lambda query, style: b"RIFF",
+        )
+        plugin._synthesizer = synthesizer
+
+        class Model:
+            def __init__(self, path):
+                self.id = Path(path).name
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                pass
+
+        blocking = SimpleNamespace(
+            VoiceModelFile=SimpleNamespace(open=Model),
+        )
+
+        with patch.dict(sys.modules, {"voicevox_core.blocking": blocking}):
+            for name in ("a", "b", "a", "c", "a"):
+                plugin._synthesize("テスト", 0, Path(name), {})
+
+        self.assertEqual(
+            events,
+            [
+                ("load", "a"),
+                ("load", "b"),
+                ("unload", "b"),
+                ("load", "c"),
+                ("unload", "a"),
+            ],
+        )
