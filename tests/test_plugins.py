@@ -276,6 +276,63 @@ class PluginManagerAsyncTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(start.await_count, 2)
 
+    async def test_starts_processors_before_plugins(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "plugins").mkdir()
+            (root / "processors").mkdir()
+            write_plugin(root / "plugins", "tts", "plugin = object()\n")
+            write_plugin(
+                root / "plugins",
+                "other",
+                "plugin = object()\n",
+            )
+            write_plugin(
+                root / "processors",
+                "reading",
+                "plugin = object()\n",
+                ["torch>=2.8"],
+            )
+            manager = PluginManager(
+                root / "plugins",
+                {"tts": {"enabled": True}, "other": {"enabled": True}},
+                {"tts": "torch-cpu", "other": "python"},
+                root / "runtimes",
+                root / "processors",
+                {"reading": {"enabled": True, "min_confidence": 0.5}},
+                {"reading": "torch-cpu"},
+                {"tts": "reading"},
+            )
+            disabled = PluginManager(
+                root / "plugins",
+                {"tts": {"enabled": True}},
+                {"tts": "python"},
+                root / "runtimes",
+                root / "processors",
+                {"reading": {"enabled": False}},
+                {},
+                {"tts": "reading"},
+            )
+            started = []
+
+            async def start(process):
+                started.append(process.definition.name)
+
+            with (
+                patch.object(manager, "_prepare_runtime") as prepare,
+                patch.object(PluginProcess, "start", new=start),
+            ):
+                await manager.start()
+
+        self.assertEqual(manager.names, ["other", "tts"])
+        self.assertEqual(started, ["reading", "other", "tts"])
+        prepare.assert_any_call("torch-cpu", ["torch>=2.8"])
+        processor = manager.get("tts").processor
+        self.assertEqual(processor.definition.name, "reading")
+        self.assertEqual(processor.config, {"min_confidence": 0.5})
+        self.assertIsNone(manager.get("other").processor)
+        self.assertIsNone(disabled.get("tts").processor)
+
 class PluginProcessTest(unittest.IsolatedAsyncioTestCase):
     async def test_communicates_with_plugin_process(self):
         source = (
@@ -415,6 +472,133 @@ class PluginProcessTest(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(process.start(), 5)
 
             await process.close()
+
+    async def test_processes_text_before_synthesis(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            processor_dir = write_plugin(
+                root,
+                "reading",
+                "class Processor:\n"
+                "    async def process(self, text):\n"
+                "        if text == 'broken':\n"
+                "            raise RuntimeError('processor failed')\n"
+                "        return text.replace('辛い', 'カライ')\n"
+                "\n"
+                "plugin = Processor()\n",
+            )
+            plugin_dir = write_plugin(
+                root,
+                "tts",
+                "class Plugin:\n"
+                "    async def speakers(self):\n"
+                "        return []\n"
+                "\n"
+                "    async def synthesize(self, text, speaker, options):\n"
+                "        return text.encode()\n"
+                "\n"
+                "plugin = Plugin()\n",
+            )
+            processor = PluginProcess(
+                PluginDefinition(
+                    "reading",
+                    processor_dir,
+                    processor_dir / "plugin.py",
+                    (),
+                    1,
+                ),
+                Path(sys.executable),
+                {},
+            )
+            plugin = PluginProcess(
+                PluginDefinition(
+                    "tts",
+                    plugin_dir,
+                    plugin_dir / "plugin.py",
+                    (),
+                    1,
+                ),
+                Path(sys.executable),
+                {},
+                processor,
+            )
+
+            try:
+                await processor.start()
+                await plugin.start()
+                audio = await plugin.synthesize("辛い料理", "話者", {})
+
+                with self.assertLogs("utils.plugin.manager", "ERROR"):
+                    fallback = await plugin.synthesize("broken", "話者", {})
+            finally:
+                await asyncio.wait_for(plugin.close(), 5)
+                await asyncio.wait_for(processor.close(), 5)
+
+        self.assertEqual(audio, "カライ料理".encode())
+        self.assertEqual(fallback, b"broken")
+
+class ReadingProcessorTest(unittest.IsolatedAsyncioTestCase):
+    """Yomogiのモデル及びruntimeがある場合だけ、実際に読みを補正する"""
+
+    async def test_corrects_readings_with_yomogi(self):
+        processor_dir = Path(__file__).parents[1] / "processors" / "reading"
+
+        if not (processor_dir / "model" / "model.pt").is_file():
+            self.skipTest("Yomogi model is not installed")
+
+        runtimes = {
+            runtime: PluginManager()._runtime_python(runtime)
+            for runtime in ("torch-cpu", "torch-auto")
+        }
+        runtimes = {
+            runtime: python
+            for runtime, python in runtimes.items()
+            if python.is_file()
+        }
+
+        if not runtimes:
+            self.skipTest("torch-cpu or torch-auto runtime is not installed")
+
+        for runtime, python in runtimes.items():
+            with self.subTest(runtime=runtime):
+                self.assertEqual(
+                    await self._process(processor_dir, python),
+                    [
+                        # OpenJTalkと読みが同じ「今日」「料理」は漢字のまま残す
+                        "今日はカライ料理を食べた。",
+                        "イチバで魚を買う。株式市場が暴落した",
+                        # 数字と助数詞はTTSエンジンに任せる
+                        "３本のペン",
+                        "ボイスボックスとディスコードのＡＰＩ",
+                    ],
+                )
+
+    async def _process(self, processor_dir: Path, python: Path) -> list[str]:
+        with TemporaryDirectory() as directory:
+            dictionary = Path(directory, "dictionary.tsv")
+            dictionary.write_text(
+                "# 表記\t読み\nVOICEVOX\tボイスボックス\n",
+                encoding="utf-8",
+            )
+            process = PluginProcess(
+                PluginManager()._load_definition(processor_dir, "reading"),
+                python,
+                {"dictionary": str(dictionary)},
+            )
+
+            try:
+                await asyncio.wait_for(process.start(), 120)
+                return [
+                    await process.process(text)
+                    for text in (
+                        "今日は辛い料理を食べた。",
+                        "市場で魚を買う。株式市場が暴落した",
+                        "3本のペン",
+                        "VOICEVOXとDiscordのAPI",
+                    )
+                ]
+            finally:
+                await asyncio.wait_for(process.close(), 5)
 
 class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
     async def test_lists_speakers_by_plugin(self):

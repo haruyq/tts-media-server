@@ -21,12 +21,13 @@ def _load_plugin(path: Path) -> Any:
     spec.loader.exec_module(module)
     plugin = getattr(module, "plugin", None)
 
-    if (
+    if not callable(getattr(plugin, "process", None)) and (
         not callable(getattr(plugin, "speakers", None))
         or not callable(getattr(plugin, "synthesize", None))
     ):
         raise TypeError(
-            "Plugin must provide callable speakers() and synthesize()"
+            "Plugin must provide callable speakers() and synthesize(), "
+            "or process() for processors"
         )
 
     return plugin
@@ -126,6 +127,19 @@ def _handle_request(
             raise TypeError("synthesize() must return bytes")
 
         return {"result": None}, data, initialized
+
+    if method == "process":
+        text = params.get("text")
+
+        if not isinstance(text, str):
+            raise ValueError("Invalid process request")
+
+        result = _run_async(loop, plugin.process(text))
+
+        if not isinstance(result, str):
+            raise TypeError("process() must return a string")
+
+        return {"result": result}, b"", initialized
 
     raise ValueError(f"Unsupported plugin operation: {method}")
 

@@ -1,0 +1,8 @@
+api_version = 1
+entrypoint = "processor.py"
+dependencies = [
+    "cmudict>=1.0.2,<2",
+    "e2k>=0.6.2,<0.7",
+    "pyopenjtalk-plus[onnxruntime]>=0.4.1",
+    "torch>=2.7,<2.12",
+]

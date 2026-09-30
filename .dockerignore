@@ -6,5 +6,6 @@
 *.py[cod]
 plugins/piper_tts/models/*.onnx
 plugins/piper_tts/models/*.onnx.json
+processors/reading/model
 application.toml
 tests

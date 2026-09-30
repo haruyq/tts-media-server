@@ -26,6 +26,7 @@ RUN uv sync --locked --no-dev --no-install-project --no-cache
 
 COPY src ./src
 COPY plugins ./plugins
+COPY processors ./processors
 
 USER app
 

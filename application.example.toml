@@ -21,3 +21,16 @@ kokoro_82m = "python"
 piper_tts = "piper_tts"
 aitalked = "python"
 coeiroink = "torch-auto"
+
+[plugins.processor]
+voicevox = "reading"
+coeiroink = "reading"
+piper_tts = "reading"
+aitalked = "reading"
+kokoro_82m = "reading"
+
+[processors]
+reading = { enabled = false, model_dir = "model", device = "auto", min_confidence = 0.5 }
+
+[processors.runtime]
+reading = "torch-auto"

@@ -62,10 +62,12 @@ class PluginProcess:
         definition: PluginDefinition,
         python: Path,
         config: dict[str, Any],
+        processor: "PluginProcess | None" = None,
     ) -> None:
         self.definition = definition
         self.python = python
         self.config = config
+        self.processor = processor
         self._process: subprocess.Popen[bytes] | None = None
         # ponytail: requests are serialized; add request IDs if parallel
         # inference is ever required by a plugin.
@@ -117,6 +119,15 @@ class PluginProcess:
         speaker: str,
         options: dict[str, Any],
     ) -> bytes:
+        if self.processor is not None:
+            try:
+                text = await self.processor.process(text)
+            except Exception:
+                # 読み補正に失敗しても、補正前の文で読み上げを続ける
+                Log.exception(
+                    f"Unable to process text: {self.processor.definition.name}"
+                )
+
         result, payload = await self._request(
             "synthesize",
             {
@@ -132,6 +143,16 @@ class PluginProcess:
             )
 
         return payload
+
+    async def process(self, text: str) -> str:
+        result, payload = await self._request("process", {"text": text})
+
+        if payload or not isinstance(result, str):
+            raise RuntimeError(
+                f"Invalid process response: {self.definition.name}"
+            )
+
+        return result
 
     async def _request(
         self,
@@ -347,17 +368,92 @@ class PluginManager:
         configs: dict[str, dict[str, Any]] | None = None,
         runtimes: dict[str, str] | None = None,
         runtime_dir: Path | None = None,
+        processors_dir: Path = Path("processors"),
+        processor_configs: dict[str, dict[str, Any]] | None = None,
+        processor_runtimes: dict[str, str] | None = None,
+        plugin_processors: dict[str, str] | None = None,
     ) -> None:
-        self._plugins: dict[str, PluginProcess] = {}
-        self._runtimes: dict[str, str] = {}
+        # 起動順 (読み補正等のprocessorが先) に並べた、runtime名とプロセスの組
+        self._processes: list[tuple[str, PluginProcess]] = []
         self._runtime_dir = runtime_dir or Path(
             os.environ.get(
                 "TTS_MEDIA_SERVER_RUNTIME_DIR",
                 Path.home() / ".cache" / "tts-media-server" / "runtimes",
             )
         )
-        configs = configs or {}
-        runtimes = runtimes or {}
+        plugin_processors = plugin_processors or {}
+        processors = self._create_processes(
+            processors_dir,
+            processor_configs or {},
+            processor_runtimes or {},
+            {},
+        )
+
+        # 無効化されたprocessorは使わず、補正前の文をそのまま合成する
+        self._plugins = self._create_processes(
+            plugins_dir,
+            configs or {},
+            runtimes or {},
+            {
+                name: processors[processor]
+                for name, processor in plugin_processors.items()
+                if processor in processors
+            },
+        )
+        Log.info(
+            f"{len(self._plugins)} plugin(s) and "
+            f"{len(processors)} processor(s) found"
+        )
+
+    @property
+    def names(self) -> list[str]:
+        return sorted(self._plugins)
+
+    def get(self, plugin_name: str) -> TTSPlugin:
+        try:
+            return self._plugins[plugin_name]
+        except KeyError:
+            raise PluginNotFound(plugin_name)
+
+    async def start(self) -> None:
+        dependencies: dict[str, set[str]] = {}
+
+        for runtime, process in self._processes:
+            dependencies.setdefault(runtime, set()).update(
+                process.definition.dependencies
+            )
+
+        try:
+            for runtime, requirements in sorted(dependencies.items()):
+                await asyncio.to_thread(
+                    self._prepare_runtime,
+                    runtime,
+                    sorted(requirements),
+                )
+
+            for _, process in self._processes:
+                await process.start()
+        except BaseException:
+            await self.close()
+            raise
+
+    async def close(self) -> None:
+        for _, process in reversed(self._processes):
+            try:
+                await process.close()
+            except Exception:
+                Log.exception(
+                    f"Unable to stop plugin: {process.definition.name}"
+                )
+
+    def _create_processes(
+        self,
+        directory: Path,
+        configs: dict[str, dict[str, Any]],
+        runtimes: dict[str, str],
+        processors: dict[str, PluginProcess],
+    ) -> dict[str, PluginProcess]:
+        processes: dict[str, PluginProcess] = {}
 
         for name, config in sorted(configs.items()):
             if not config["enabled"]:
@@ -374,62 +470,21 @@ class PluginManager:
             if not _runtime_name.fullmatch(runtime):
                 raise ValueError(f"Invalid plugin runtime: {runtime}")
 
-            definition = self._load_definition(plugins_dir / name, name)
-            plugin_config = {
+            definition = self._load_definition(directory / name, name)
+            process_config = {
                 key: value
                 for key, value in config.items()
                 if key != "enabled"
             }
-            self._runtimes[name] = runtime
-            self._plugins[name] = PluginProcess(
+            processes[name] = PluginProcess(
                 definition,
                 self._runtime_python(runtime),
-                plugin_config,
+                process_config,
+                processors.get(name),
             )
+            self._processes.append((runtime, processes[name]))
 
-        Log.info(f"{len(self._plugins)} plugin(s) found")
-
-    @property
-    def names(self) -> list[str]:
-        return sorted(self._plugins)
-
-    def get(self, plugin_name: str) -> TTSPlugin:
-        try:
-            return self._plugins[plugin_name]
-        except KeyError:
-            raise PluginNotFound(plugin_name)
-
-    async def start(self) -> None:
-        dependencies: dict[str, set[str]] = {}
-
-        for name, plugin in self._plugins.items():
-            runtime = self._runtimes[name]
-            dependencies.setdefault(runtime, set()).update(
-                plugin.definition.dependencies
-            )
-
-        try:
-            for runtime, requirements in sorted(dependencies.items()):
-                await asyncio.to_thread(
-                    self._prepare_runtime,
-                    runtime,
-                    sorted(requirements),
-                )
-
-            for plugin in self._plugins.values():
-                await plugin.start()
-        except BaseException:
-            await self.close()
-            raise
-
-    async def close(self) -> None:
-        for plugin in reversed(self._plugins.values()):
-            try:
-                await plugin.close()
-            except Exception:
-                Log.exception(
-                    f"Unable to stop plugin: {plugin.definition.name}"
-                )
+        return processes
 
     def _load_definition(
         self,
@@ -670,4 +725,7 @@ class PluginManager:
 plugin_manager = PluginManager(
     configs=settings.plugins,
     runtimes=settings.plugin_runtimes,
+    processor_configs=settings.processors,
+    processor_runtimes=settings.processor_runtimes,
+    plugin_processors=settings.plugin_processors,
 )

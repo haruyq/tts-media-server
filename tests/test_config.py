@@ -151,6 +151,30 @@ class ConfigTest(unittest.TestCase):
                 "coeiroink": "torch-auto",
             },
         )
+        self.assertEqual(
+            config.plugin_processors,
+            {"voicevox": "reading", "coeiroink": "reading"},
+        )
+        self.assertEqual(config.processors["reading"]["enabled"], False)
+        self.assertEqual(config.processor_runtimes, {"reading": "torch-auto"})
+
+    def test_rejects_unknown_processor(self):
+        source = Path(__file__).parents[1] / "application.example.toml"
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory, "application.toml")
+            path.write_text(
+                source.read_text(encoding="utf-8")
+                .replace(
+                    'password = "change-me-before-exposing"',
+                    'password = "test-password"',
+                )
+                .replace('voicevox = "reading"', 'voicevox = "missing"'),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "Unknown processor"):
+                load_config(path)
 
     def test_rejects_invalid_plugin_runtime(self):
         source = Path(__file__).parents[1] / "application.example.toml"

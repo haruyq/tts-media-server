@@ -28,6 +28,9 @@ class ApplicationConfig:
     limits: LimitsConfig
     plugins: dict[str, dict[str, Any]]
     plugin_runtimes: dict[str, str]
+    processors: dict[str, dict[str, Any]]
+    processor_runtimes: dict[str, str]
+    plugin_processors: dict[str, str]
 
 def load_config(
     path: Path = Path(__file__).parents[2] / "application.toml",
@@ -37,7 +40,6 @@ def load_config(
 
     server = ServerConfig(**data["server"])
     limits = LimitsConfig(**data["limits"])
-    plugin_values = data.get("plugins", {})
 
     if (
         not isinstance(server.ip, str)
@@ -64,74 +66,125 @@ def load_config(
     ):
         raise ValueError("All [limits] values must be positive integers")
 
-    if not isinstance(plugin_values, dict):
-        raise ValueError("[plugins] must be a table")
+    plugins, plugin_tables = _load_processes(
+        data.get("plugins", {}),
+        "plugin",
+        ("runtime", "processor"),
+    )
+    processors, processor_tables = _load_processes(
+        data.get("processors", {}),
+        "processor",
+        ("runtime",),
+    )
+    plugin_processors = plugin_tables["processor"]
 
-    plugin_values = dict(plugin_values)
-    runtime_values = plugin_values.pop("runtime", {})
+    unknown_plugins = set(plugin_processors) - set(plugins)
 
-    if not isinstance(runtime_values, dict) or not all(
-        isinstance(name, str)
-        and name
-        and isinstance(runtime, str)
-        and fullmatch(RUNTIME_NAME, runtime) is not None
-        for name, runtime in runtime_values.items()
-    ):
-        raise ValueError("[plugins.runtime] must map plugin names to runtimes")
+    if unknown_plugins:
+        raise ValueError(
+            "Processor configured for unknown plugin: "
+            f"{', '.join(sorted(unknown_plugins))}"
+        )
 
-    plugins: dict[str, dict[str, Any]] = {}
+    unknown_processors = set(plugin_processors.values()) - set(processors)
 
-    for name, plugin_config in plugin_values.items():
-        if isinstance(plugin_config, bool):
-            plugin_config = {"enabled": plugin_config}
+    if unknown_processors:
+        raise ValueError(
+            "Unknown processor: "
+            f"{', '.join(sorted(unknown_processors))}"
+        )
+
+    return ApplicationConfig(
+        server,
+        limits,
+        plugins,
+        plugin_tables["runtime"],
+        processors,
+        processor_tables["runtime"],
+        plugin_processors,
+    )
+
+def _load_processes(
+    values: Any,
+    kind: str,
+    table_names: tuple[str, ...],
+) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, str]]]:
+    section = f"{kind}s"
+
+    if not isinstance(values, dict):
+        raise ValueError(f"[{section}] must be a table")
+
+    values = dict(values)
+    tables = {table: values.pop(table, {}) for table in table_names}
+
+    for table, value in tables.items():
+        if not isinstance(value, dict) or not all(
+            isinstance(name, str)
+            and name
+            and isinstance(target, str)
+            and fullmatch(RUNTIME_NAME, target) is not None
+            for name, target in value.items()
+        ):
+            raise ValueError(
+                f"[{section}.{table}] must map {kind} names to {table}s"
+            )
+
+    runtime_values = tables["runtime"]
+
+    configs: dict[str, dict[str, Any]] = {}
+
+    for name, config in values.items():
+        if isinstance(config, bool):
+            config = {"enabled": config}
 
         if (
             not isinstance(name, str)
             or fullmatch(RUNTIME_NAME, name) is None
-            or not isinstance(plugin_config, dict)
-            or not isinstance(plugin_config.get("enabled"), bool)
+            or not isinstance(config, dict)
+            or not isinstance(config.get("enabled"), bool)
         ):
             raise ValueError(
-                "Each [plugins] value must be a table with enabled = true or false"
+                f"Each [{section}] value must be a table with "
+                "enabled = true or false"
             )
 
-        plugins[name] = dict(plugin_config)
+        configs[name] = dict(config)
 
         try:
             json.dumps(
                 {
                     key: value
-                    for key, value in plugin_config.items()
+                    for key, value in config.items()
                     if key != "enabled"
                 },
                 allow_nan=False,
             )
         except (TypeError, ValueError) as exception:
             raise ValueError(
-                f"Plugin config must be JSON-compatible: {name}"
+                f"{kind.capitalize()} config must be JSON-compatible: {name}"
             ) from exception
 
-    unknown_runtimes = set(runtime_values) - set(plugins)
+    unknown_runtimes = set(runtime_values) - set(configs)
 
     if unknown_runtimes:
         raise ValueError(
-            "Runtime configured for unknown plugin: "
+            f"Runtime configured for unknown {kind}: "
             f"{', '.join(sorted(unknown_runtimes))}"
         )
 
     missing_runtimes = {
         name
-        for name, plugin_config in plugins.items()
-        if plugin_config["enabled"] and name not in runtime_values
+        for name, config in configs.items()
+        if config["enabled"] and name not in runtime_values
     }
 
     if missing_runtimes:
         raise ValueError(
-            "Runtime not configured for enabled plugin: "
+            f"Runtime not configured for enabled {kind}: "
             f"{', '.join(sorted(missing_runtimes))}"
         )
 
-    return ApplicationConfig(server, limits, plugins, dict(runtime_values))
+    return configs, {table: dict(value) for table, value in tables.items()}
 
 settings = load_config()
 

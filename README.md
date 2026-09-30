@@ -16,6 +16,11 @@ TTS音声ファイルの生成とDiscordのボイスチャンネルへの送信�
 
 これらはリポジトリからコピーして使用できます。
 
+## 読み補正
+
+`processors/reading`は、[Yomogi](https://huggingface.co/spaces/litagin/yomogi-v1.8)による文脈に応じた読み分け、ユーザー辞書及び英単語のカタカナ変換で、合成前の文を補正します。
+別プロセス (torch, cpu/cuda) で動作し、`[plugins.processor]`で指定したプラグインにだけ適用されます。
+
 ## ライセンス
 
 このプロジェクトは[MIT License](./LICENSE)で公開されています。

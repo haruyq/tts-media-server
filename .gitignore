@@ -17,3 +17,5 @@ application.toml
 plugins/piper_tts/nltk_data/
 plugins/coeiroink/speaker_info/
 plugins/voicevox/voicevox_core/
+processors/reading/model/
+processors/reading/*.tsv

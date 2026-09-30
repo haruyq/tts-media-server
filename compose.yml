@@ -6,6 +6,7 @@ services:
     volumes:
       - ./application.toml:/app/application.toml:ro
       - ./plugins:/app/plugins:ro
+      - ./processors:/app/processors:ro
       - plugin-runtimes:/home/app/.cache/tts-media-server/runtimes
 
 volumes:

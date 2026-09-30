@@ -100,6 +100,34 @@ Torchを含む依存関係では、通常のruntime名でもuvがbackendを自�
 異なるTorch又はCUDA構成が必要なプラグインには、異なるruntime名を指定します。
 GPU構成の変更又は同じパスにある同梱wheelの差し替え後は、該当runtimeのディレクトリを削除すると再構築されます。
 
+### 読み補正processor
+
+`processors/<processor名>`には、合成前の文を書き換えるprocessorを配置します。
+構成、`plugin.toml`及びruntimeはプラグインと同じで、`plugin`変数に非同期関数`process(text: str) -> str`を定義します。
+
+```toml
+[plugins.processor]
+voicevox = "reading"
+
+[processors]
+reading = { enabled = true, model_dir = "model", dictionary = "user_dictionary.tsv", device = "auto", min_confidence = 0.5 }
+
+[processors.runtime]
+reading = "torch-auto"
+```
+
+`[plugins.processor]`に指定したTTSプラグインの`synthesize`の直前でだけ呼ばれます。
+processorが無効な場合、又は失敗した場合は補正前の文で合成します。
+
+公式の`reading`は、ユーザー辞書、Yomogi及び英語G2Pの順に読みを決め、必要な箇所だけをカタカナへ置換します。
+
+- ユーザー辞書は`表記<TAB>読み`形式のTSVで、最優先で適用されます。
+- Yomogiの読みはpyopenjtalk-plus (OpenJTalk) の読みと比較し、食い違う箇所だけを置換します。信頼度が`min_confidence`未満の読みはTTSエンジンに任せます。
+- 英単語はCMUdictの発音記号又は綴りからカタカナへ変換します。大文字だけの略語は変換しません。
+- アクセント及び韻律はTTSエンジンに任せます。
+- Yomogiのモデルは[litagin/yomogi-v1.8](https://huggingface.co/spaces/litagin/yomogi-v1.8/tree/main/model)の`model`ディレクトリを`processors/reading/model`へ配置します。
+- `device`は`auto`、`cpu`、`cuda`又は`cuda:<index>`です。COEIROINKと同じ`torch-auto`のruntimeを指定するとtorchを共有し、GPUで推論できます。CPUだけで動かす場合は`torch-cpu`を指定すると、CPU版の小さいtorchだけを導入します。
+
 ### 実装及びテストの方針
 
 - 外部TTSバックエンドとの通信には`aiohttp`を優先し、`plugin.toml`の依存関係へ追加してください。
