@@ -1,21 +1,29 @@
 from fastapi import APIRouter, HTTPException, Response
 
 from utils.config import settings
+from utils.logger import Logger
 from utils.models import SpeechRequest
 from utils.plugin.manager import plugin_manager
 
 router = APIRouter()
+Log = Logger(__name__)
 
 @router.get("/plugins")
 async def list_plugins() -> dict[str, list[str]]:
     return {"plugins": plugin_manager.names}
 
+# 1つのプラグインの障害で一覧全体を500にせず、そのプラグインだけ除外する
 @router.get("/speakers")
 async def list_speakers() -> dict[str, list[str]]:
-    return {
-        name: await plugin_manager.get(name).speakers()
-        for name in plugin_manager.names
-    }
+    speakers = {}
+
+    for name in plugin_manager.names:
+        try:
+            speakers[name] = await plugin_manager.get(name).speakers()
+        except Exception:
+            Log.exception(f"Unable to list speakers: {name}")
+
+    return speakers
 
 @router.get("/styles")
 async def list_styles() -> dict[str, dict[str, list[str]]]:
@@ -24,7 +32,11 @@ async def list_styles() -> dict[str, dict[str, list[str]]]:
     for name in plugin_manager.names:
         plugin = plugin_manager.get(name)
         get_styles = getattr(plugin, "styles", None)
-        styles[name] = await get_styles() if callable(get_styles) else {}
+
+        try:
+            styles[name] = await get_styles() if callable(get_styles) else {}
+        except Exception:
+            Log.exception(f"Unable to list styles: {name}")
 
     return styles
 

@@ -344,6 +344,53 @@ class PluginProcessTest(unittest.IsolatedAsyncioTestCase):
             "音声:こんにちは".encode() + b"\x00\xff",
         )
 
+    async def test_serves_cached_speakers_during_slow_synthesis(self):
+        source = (
+            "import asyncio\n"
+            "\n"
+            "class Plugin:\n"
+            "    async def speakers(self):\n"
+            "        return ['話者']\n"
+            "\n"
+            "    async def styles(self):\n"
+            "        return {'話者': ['通常']}\n"
+            "\n"
+            "    async def synthesize(self, text, speaker, options):\n"
+            "        await asyncio.sleep(3)\n"
+            "        return b''\n"
+            "\n"
+            "plugin = Plugin()\n"
+        )
+
+        with TemporaryDirectory() as directory:
+            plugin_dir = Path(directory)
+            entrypoint = plugin_dir / "plugin.py"
+            entrypoint.write_text(source, encoding="utf-8")
+            process = PluginProcess(
+                PluginDefinition("slow", plugin_dir, entrypoint, (), 1),
+                Path(sys.executable),
+                {},
+            )
+
+            try:
+                await process.start()
+                await process.speakers()
+                await process.styles()
+                synthesis = asyncio.create_task(
+                    process.synthesize("こんにちは", "話者", {})
+                )
+                await asyncio.sleep(0.5)
+                speakers, styles = await asyncio.wait_for(
+                    asyncio.gather(process.speakers(), process.styles()),
+                    1,
+                )
+                await synthesis
+            finally:
+                await asyncio.wait_for(process.close(), 5)
+
+        self.assertEqual(speakers, ["話者"])
+        self.assertEqual(styles, {"話者": ["通常"]})
+
     async def test_reports_plugin_startup_failure(self):
         with TemporaryDirectory() as directory:
             plugin_dir = Path(directory)
@@ -386,6 +433,29 @@ class SpeakerEndpointTest(unittest.IsolatedAsyncioTestCase):
             response,
             {"voicevox": ["ずんだもん", "四国めたん"]},
         )
+
+    async def test_skips_failing_plugin(self):
+        plugins = {
+            "broken": SimpleNamespace(
+                speakers=AsyncMock(side_effect=RuntimeError("offline")),
+                styles=AsyncMock(side_effect=RuntimeError("offline")),
+            ),
+            "voicevox": SimpleNamespace(
+                speakers=AsyncMock(return_value=["ずんだもん"]),
+                styles=AsyncMock(return_value={"ずんだもん": ["ノーマル"]}),
+            ),
+        }
+        manager = SimpleNamespace(names=sorted(plugins), get=plugins.__getitem__)
+
+        with (
+            patch("routers.plugins.plugin_manager", manager),
+            self.assertLogs("routers.plugins", "ERROR"),
+        ):
+            speakers = await list_speakers()
+            styles = await list_styles()
+
+        self.assertEqual(speakers, {"voicevox": ["ずんだもん"]})
+        self.assertEqual(styles, {"voicevox": {"ずんだもん": ["ノーマル"]}})
 
     async def test_lists_styles_by_plugin(self):
         plugin = SimpleNamespace(

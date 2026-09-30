@@ -71,6 +71,8 @@ class PluginProcess:
         # inference is ever required by a plugin.
         self._request_lock = threading.Lock()
         self._process_lock = threading.Lock()
+        # 合成中にspeakers/stylesが合成の完了待ちで詰まらないよう、前回の応答を返す
+        self._cache: dict[str, tuple[Any, bytes]] = {}
         self._stderr_thread: threading.Thread | None = None
         self._closed = False
 
@@ -197,8 +199,21 @@ class PluginProcess:
         if self._closed:
             raise RuntimeError(f"Plugin is closed: {self.definition.name}")
 
-        with self._request_lock:
-            return self._exchange(method, params)
+        if method in self._cache:
+            if not self._request_lock.acquire(blocking=False):
+                return self._cache[method]
+        else:
+            self._request_lock.acquire()
+
+        try:
+            response = self._exchange(method, params)
+        finally:
+            self._request_lock.release()
+
+        if method in ("speakers", "styles"):
+            self._cache[method] = response
+
+        return response
 
     def _exchange(
         self,
