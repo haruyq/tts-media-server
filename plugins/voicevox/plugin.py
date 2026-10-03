@@ -1,11 +1,13 @@
 import asyncio
 import ctypes
+import io
 import logging
 import math
 import os
 import shutil
 import subprocess
 import time
+import wave
 
 from collections import OrderedDict
 from pathlib import Path
@@ -21,6 +23,20 @@ Log.setLevel(logging.INFO)
 Log.propagate = False
 
 PLUGIN_DIR = Path(__file__).resolve().parent
+
+def _silence() -> bytes:
+    # VOICEVOXの出力と同じ24kHz、16bitモノラルの0.1秒の無音
+    buffer = io.BytesIO()
+
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(1)
+        writer.setsampwidth(2)
+        writer.setframerate(24000)
+        writer.writeframes(bytes(4800))
+
+    return buffer.getvalue()
+
+SILENCE = _silence()
 DEVICES = {"auto": "AUTO", "cpu": "CPU", "gpu": "GPU"}
 DEFAULT_STYLE = "ノーマル"
 DEFAULT_OPTIONS = {
@@ -246,6 +262,7 @@ class VoicevoxPlugin:
         vvm: Path,
         options: dict[str, float],
     ) -> bytes:
+        from voicevox_core import AnalyzeTextError
         from voicevox_core.blocking import VoiceModelFile
 
         start = time.perf_counter()
@@ -265,7 +282,12 @@ class VoicevoxPlugin:
 
             Log.info(f"Loaded VOICEVOX model {vvm.name}")
 
-        query = self._synthesizer.create_audio_query(text, style_id)
+        try:
+            query = self._synthesizer.create_audio_query(text, style_id)
+        except AnalyzeTextError:
+            # 「？」等の記号だけの文には読む音素が無い。VOICEVOX ENGINEと同様に
+            # エラーにせず無音を返す
+            return SILENCE
 
         for name, value in options.items():
             setattr(query, name, value)

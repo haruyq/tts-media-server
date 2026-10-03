@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import importlib.util
 import json
 import sys
@@ -1015,7 +1016,12 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
             VoiceModelFile=SimpleNamespace(open=Model),
         )
 
-        with patch.dict(sys.modules, {"voicevox_core.blocking": blocking}):
+        core = SimpleNamespace(AnalyzeTextError=type("Error", (Exception,), {}))
+
+        with patch.dict(
+            sys.modules,
+            {"voicevox_core": core, "voicevox_core.blocking": blocking},
+        ):
             for name in ("a", "b", "a", "c", "a"):
                 plugin._synthesize("テスト", 0, Path(name), {})
 
@@ -1029,3 +1035,34 @@ class VoicevoxPluginTest(unittest.IsolatedAsyncioTestCase):
                 ("unload", "a"),
             ],
         )
+
+    def test_returns_silence_for_unreadable_text(self):
+        module = load_plugin_module("voicevox")
+        plugin = module.VoicevoxPlugin()
+
+        class AnalyzeTextError(Exception):
+            pass
+
+        def create_audio_query(text, style):
+            raise AnalyzeTextError("入力テキストの解析に失敗しました")
+
+        plugin._synthesizer = SimpleNamespace(
+            load_voice_model=lambda model: None,
+            create_audio_query=create_audio_query,
+        )
+        model = SimpleNamespace(id="a")
+        blocking = SimpleNamespace(
+            VoiceModelFile=SimpleNamespace(
+                open=lambda path: contextlib.nullcontext(model),
+            ),
+        )
+        core = SimpleNamespace(AnalyzeTextError=AnalyzeTextError)
+
+        with patch.dict(
+            sys.modules,
+            {"voicevox_core": core, "voicevox_core.blocking": blocking},
+        ):
+            audio = plugin._synthesize("？", 0, Path("a"), {})
+
+        self.assertEqual(audio, module.SILENCE)
+        self.assertTrue(audio.startswith(b"RIFF"))
